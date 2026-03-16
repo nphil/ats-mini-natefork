@@ -125,8 +125,9 @@ static const char *menu[] =
 #define MENU_LOADEIBI     11
 #define MENU_USBMODE      12
 #define MENU_BLEMODE      13
-#define MENU_WIFIMODE     14
-#define MENU_ABOUT        15
+#define MENU_BLE_AUTOOFF  14
+#define MENU_WIFIMODE     15
+#define MENU_ABOUT        16
 
 
 int8_t settingsIdx = MENU_BRIGHTNESS;
@@ -147,6 +148,7 @@ static const char *settings[] =
   "Load EiBi",
   "USB Port",
   "Bluetooth",
+  "BLE Auto-Off",
   "Wi-Fi",
   "About",
 };
@@ -284,9 +286,22 @@ int getTotalUSBModes() { return(ITEM_COUNT(usbModeDesc)); }
 
 uint8_t bleModeIdx = BLE_OFF;
 static const char *bleModeDesc[] =
-{ "Off", "Ad hoc" };
+{ "Off", "On" };
 
 int getTotalBleModes() { return(ITEM_COUNT(bleModeDesc)); }
+
+//
+// BLE Auto-Off Menu
+//
+
+uint8_t bleAutoOffIdx = 0;
+static const char *bleAutoOffDesc[] =
+{ "Never", "5 min", "15 min", "30 min", "1 hr" };
+
+static const uint32_t bleAutoOffMs[] =
+{ 0, 300000UL, 900000UL, 1800000UL, 3600000UL };
+
+uint32_t getBleAutoOffMs() { return bleAutoOffMs[bleAutoOffIdx]; }
 
 //
 // WiFi Mode Menu
@@ -599,6 +614,25 @@ static void doTheme(int16_t enc)
   themeIdx = wrap_range(themeIdx, enc, 0, getTotalThemes() - 1);
 }
 
+// Rotate the custom theme hue with the encoder; live-updates the theme slot
+static void doCustomTheme(int16_t enc)
+{
+  if(!enc) return;
+  int16_t h = (int16_t)customThemeHue + enc;
+  if(h < 0)   h += 360;
+  if(h >= 360) h -= 360;
+  customThemeHue = (uint16_t)h;
+  applyCustomTheme(customThemeHue);
+}
+
+// Click while the color wheel is open: confirm and close
+static void clickCustomTheme(bool shortPress)
+{
+  (void)shortPress;
+  prefsRequestSave(SAVE_SETTINGS);
+  currentCmd = CMD_NONE;
+}
+
 static void doUILayout(int16_t enc)
 {
   uiLayoutIdx = uiLayoutIdx > LAST_ITEM(uiLayoutDesc) ? UI_DEFAULT : wrap_range(uiLayoutIdx, enc, 0, LAST_ITEM(uiLayoutDesc));
@@ -670,6 +704,11 @@ static void doBleMode(int16_t enc)
   uint8_t newBleModeIdx = wrap_range(bleModeIdx, enc, 0, LAST_ITEM(bleModeDesc));
   bleInit(newBleModeIdx);
   bleModeIdx = newBleModeIdx;
+}
+
+static void doBleAutoOff(int16_t enc)
+{
+  bleAutoOffIdx = wrap_range(bleAutoOffIdx, enc, 0, LAST_ITEM(bleAutoOffDesc));
 }
 
 static void doWiFiMode(int16_t enc)
@@ -953,8 +992,9 @@ static void clickSettings(int cmd, bool shortPress)
     case MENU_SLEEPMODE:  currentCmd = CMD_SLEEPMODE;  break;
     case MENU_UTCOFFSET:  currentCmd = CMD_UTCOFFSET;  break;
     case MENU_USBMODE:    currentCmd = CMD_USBMODE;    break;
-    case MENU_BLEMODE:    currentCmd = CMD_BLEMODE;    break;
-    case MENU_WIFIMODE:   currentCmd = CMD_WIFIMODE;   break;
+    case MENU_BLEMODE:     currentCmd = CMD_BLEMODE;     break;
+    case MENU_BLE_AUTOOFF: currentCmd = CMD_BLE_AUTOOFF; break;
+    case MENU_WIFIMODE:    currentCmd = CMD_WIFIMODE;    break;
     case MENU_FM_REGION:
       // Only in FM mode
       if(currentMode==FM) currentCmd = CMD_FM_REGION;
@@ -995,14 +1035,16 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_SLEEP:      doSleep(enca);break;
     case CMD_SLEEPMODE:  doSleepMode(scrollDirection * enc);break;
     case CMD_USBMODE:    doUSBMode(scrollDirection * enc);break;
-    case CMD_BLEMODE:    doBleMode(scrollDirection * enc);break;
-    case CMD_WIFIMODE:   doWiFiMode(scrollDirection * enc);break;
+    case CMD_BLEMODE:     doBleMode(scrollDirection * enc);break;
+    case CMD_BLE_AUTOOFF: doBleAutoOff(scrollDirection * enc);break;
+    case CMD_WIFIMODE:    doWiFiMode(scrollDirection * enc);break;
     case CMD_ZOOM:       doZoom(enc);break;
     case CMD_SCROLL:     doScrollDir(enc);break;
     case CMD_UTCOFFSET:  doUTCOffset(scrollDirection * enc);break;
     case CMD_SQUELCH:    doSquelch(enca);break;
-    case CMD_ABOUT:      doAbout(enc);break;
-    case CMD_SCAN:       return doScanChannel(scrollDirection * enc);
+    case CMD_ABOUT:        doAbout(enc);break;
+    case CMD_SCAN:         return doScanChannel(scrollDirection * enc);
+    case CMD_CUSTOM_THEME: doCustomTheme(scrollDirection * enc);break;
     default:             return(false);
   }
 
@@ -1014,16 +1056,25 @@ bool clickHandler(uint16_t cmd, bool shortPress)
 {
   switch(cmd)
   {
-    case CMD_MENU:     clickMenu(menuIdx, shortPress);break;
-    case CMD_SETTINGS: clickSettings(settingsIdx, shortPress);break;
-    case CMD_MEMORY:   clickMemory(memoryIdx, shortPress);break;
-    case CMD_WIFIMODE: clickWiFiMode(wifiModeIdx, shortPress);break;
-    case CMD_VOLUME:   clickVolume(shortPress);break;
-    case CMD_SQUELCH:  clickSquelch(shortPress);break;
-    case CMD_SEEK:     clickSeek(shortPress);break;
-    case CMD_SCAN:     clickScan(shortPress);break;
-    case CMD_FREQ:     return(clickFreq(shortPress));
-    default:           return(false);
+    case CMD_MENU:          clickMenu(menuIdx, shortPress);break;
+    case CMD_SETTINGS:      clickSettings(settingsIdx, shortPress);break;
+    case CMD_MEMORY:        clickMemory(memoryIdx, shortPress);break;
+    case CMD_WIFIMODE:      clickWiFiMode(wifiModeIdx, shortPress);break;
+    case CMD_VOLUME:        clickVolume(shortPress);break;
+    case CMD_SQUELCH:       clickSquelch(shortPress);break;
+    case CMD_SEEK:          clickSeek(shortPress);break;
+    case CMD_SCAN:          clickScan(shortPress);break;
+    case CMD_FREQ:          return(clickFreq(shortPress));
+    // When clicking while scrolling through themes, enter the color
+    // wheel if the Custom slot is selected; otherwise just close.
+    case CMD_THEME:
+      if(themeIdx == getTotalThemes() - 1)
+        currentCmd = CMD_CUSTOM_THEME;
+      else
+        currentCmd = CMD_NONE;
+      break;
+    case CMD_CUSTOM_THEME:  clickCustomTheme(shortPress);break;
+    default:                return(false);
   }
 
   // Encoder input handled
@@ -1333,6 +1384,28 @@ static void drawBleMode(int x, int y, int sx)
 
     spr.setTextDatum(MC_DATUM);
     spr.drawString(bleModeDesc[abs((bleModeIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+  }
+}
+
+static void drawBleAutoOff(int x, int y, int sx)
+{
+  drawCommon(settings[MENU_BLE_AUTOOFF], x, y, sx, true);
+
+  int count = ITEM_COUNT(bleAutoOffDesc);
+  for(int i=-2 ; i<3 ; i++)
+  {
+    if(i==0) {
+      drawZoomedMenu(bleAutoOffDesc[abs((bleAutoOffIdx+count+i)%count)]);
+      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+    } else {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    // Prevent repeats for short menus
+    if(count < 5 && ((bleAutoOffIdx+i) < 0 || (bleAutoOffIdx+i) >= count)) continue;
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(bleAutoOffDesc[abs((bleAutoOffIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
   }
 }
 
@@ -1754,8 +1827,9 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_SLEEP:      drawSleep(x, y, sx);      break;
     case CMD_SLEEPMODE:  drawSleepMode(x, y, sx);  break;
     case CMD_USBMODE:    drawUSBMode(x, y, sx);    break;
-    case CMD_BLEMODE:    drawBleMode(x, y, sx);    break;
-    case CMD_WIFIMODE:   drawWiFiMode(x, y, sx);   break;
+    case CMD_BLEMODE:     drawBleMode(x, y, sx);     break;
+    case CMD_BLE_AUTOOFF: drawBleAutoOff(x, y, sx); break;
+    case CMD_WIFIMODE:    drawWiFiMode(x, y, sx);   break;
     case CMD_ZOOM:       drawZoom(x, y, sx);       break;
     case CMD_SCROLL:     drawScrollDir(x, y, sx);  break;
     case CMD_UTCOFFSET:  drawUTCOffset(x, y, sx);  break;
