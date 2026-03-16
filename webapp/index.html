@@ -285,8 +285,7 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
   try {
     setStatus('Scanning…', '');
     device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: 'ATS-Mini' }],
-      optionalServices: [NUS_SERVICE]
+      filters: [{ services: [NUS_SERVICE] }]
     });
     device.addEventListener('gattserverdisconnected', onDisconnected);
     setStatus('Connecting…', '');
