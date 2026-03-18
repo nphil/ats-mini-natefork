@@ -47,7 +47,6 @@
 #define CMD_ABOUT         0x3000 //-+
 #define CMD_CUSTOM_THEME  0x3100 // Full-screen color wheel picker
 #define CMD_CPU           0x3200 // CPU usage display toggle
-#define CMD_WATERFALL     0x3300 // Full-screen scrolling waterfall display
 
 // UI Layouts
 #define UI_DEFAULT  0

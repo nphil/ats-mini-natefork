@@ -146,6 +146,7 @@ extern TFT_eSPI tft;
 
 extern bool pushAndRotate;
 extern bool seekStop;
+extern volatile int16_t encoderCount;
 extern uint8_t rssi;
 extern uint8_t snr;
 
@@ -206,7 +207,6 @@ bool drawBattery(int x, int y);
 // Scan.c
 typedef void (*ScanProgressFn)(uint8_t pct);
 void     scanRun(uint16_t centerFreq, uint16_t step, Stream* stream = nullptr, ScanProgressFn onProgress = nullptr);
-void     waterfallRun();
 void     scanExtractChannels();
 float    scanGetRSSI(uint16_t freq);
 float    scanGetSNR(uint16_t freq);

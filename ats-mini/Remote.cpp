@@ -776,6 +776,131 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     return event;
   }
 
+  // ---- Waterfall: stream RSSI sweep rows over BLE -----------------
+  else if(!strcmp(cmd, "wf_start"))
+  {
+    // Optional window parameters; defaults to current band full span
+    long sfParam = 0, stepParam = 0, nParam = 0;
+    jsonInt(json, "sf",   &sfParam);
+    jsonInt(json, "step", &stepParam);
+    jsonInt(json, "n",    &nParam);
+
+    const Band *band = getCurrentBand();
+    uint16_t wfSf   = sfParam   ? (uint16_t)sfParam   : band->minimumFreq;
+    uint16_t wfMax  = band->maximumFreq;
+    uint16_t wfStep = stepParam ? (uint16_t)stepParam
+                                : (currentMode == FM ? 10 : 5);
+    uint16_t wfN    = nParam    ? (uint16_t)nParam    : 100;
+    if(wfN < 4)    wfN = 4;
+    if(wfN > 200)  wfN = 200;
+    if(wfStep < 1) wfStep = 1;
+
+    // Show "Waterfall" message on device screen
+    drawMessage("Waterfall");
+
+    // Ack so webapp knows parameters were accepted
+    {
+      static char ackbuf[80];
+      int an = snprintf(ackbuf, sizeof(ackbuf),
+        "{\"t\":\"ack\",\"cmd\":\"wf_start\",\"sf\":%u,\"step\":%u,\"n\":%u}\r\n",
+        wfSf, wfStep, wfN);
+      stream->write((uint8_t*)ackbuf, an);
+    }
+
+    // Save radio state and enter scan mode
+    uint16_t savedFreq = rx.getFrequency();
+    muteOn(MUTE_TEMP, true);
+    rx.setMaxDelaySetFrequency(30);
+    seekStop = false;
+
+    static uint8_t  wfRow[200];
+    static char     wfJson[1200];
+    bool firstRow = true;
+
+    while(true)
+    {
+      // Sweep wfN frequencies across the window
+      uint16_t lastFreq = 0xFFFF;
+      uint8_t  lastRSSI = 0;
+      uint16_t n = wfN;
+
+      for(uint16_t i = 0; i < n; i++)
+      {
+        uint16_t freq = wfSf + wfStep * i;
+        if(freq > wfMax) { n = i; break; }
+
+        uint8_t r;
+        if(freq != lastFreq)
+        {
+          rx.setFrequency(freq);
+          uint32_t t0 = millis();
+          while(millis() - t0 < 20)
+          {
+            rx.getStatus(0, 0);
+            if(rx.getTuneCompleteTriggered()) break;
+            delay(2);
+          }
+          rx.getCurrentReceivedSignalQuality();
+          r = rx.getCurrentRSSI();
+          lastFreq = freq;
+          lastRSSI = r;
+        }
+        else
+        {
+          r = lastRSSI;
+        }
+        wfRow[i] = r;
+      }
+
+      // Build JSON row — include metadata on first row only
+      int pos = 0;
+      if(firstRow)
+      {
+        pos = snprintf(wfJson, sizeof(wfJson),
+          "{\"t\":\"wf\",\"sf\":%u,\"step\":%u,\"n\":%u,\"r\":[",
+          wfSf, wfStep, n);
+        firstRow = false;
+      }
+      else
+      {
+        pos = snprintf(wfJson, sizeof(wfJson), "{\"t\":\"wf\",\"r\":[");
+      }
+      for(uint16_t i = 0; i < n && pos < (int)sizeof(wfJson) - 8; i++)
+        pos += snprintf(wfJson + pos, sizeof(wfJson) - pos,
+                        "%s%u", i ? "," : "", wfRow[i]);
+      if(pos < (int)sizeof(wfJson) - 4)
+      {
+        wfJson[pos++] = ']';
+        wfJson[pos++] = '}';
+        wfJson[pos++] = '\r';
+        wfJson[pos++] = '\n';
+      }
+      stream->write((uint8_t*)wfJson, pos);
+
+      // Exit: encoder button press
+      if(digitalRead(ENCODER_PUSH_BUTTON) == LOW)
+      {
+        while(digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(10);
+        break;
+      }
+      // Exit: any incoming BLE data (wf_stop or new wf_start from webapp)
+      if(stream->available()) break;
+
+      // Consume encoder rotation so main loop doesn't act on it after exit
+      seekStop = false;
+    }
+
+    // Notify webapp that session ended
+    stream->print("{\"t\":\"wf_done\"}\r\n");
+
+    // Restore radio state
+    rx.setFrequency(savedFreq);
+    muteOn(MUTE_TEMP, false);
+    rx.setMaxDelaySetFrequency(30);
+    drawScreen();
+    return event;
+  }
+
   else { return 0; } // unknown command
 
   // Send updated status after all delta commands

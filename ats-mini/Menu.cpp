@@ -87,7 +87,6 @@ Band *getCurrentBand() { return(&bands[bandIdx]); }
 #define MENU_AVC         10
 #define MENU_SOFTMUTE    11
 #define MENU_SETTINGS    12
-#define MENU_WATERFALL   13
 
 int8_t menuIdx = MENU_VOLUME;
 
@@ -106,7 +105,6 @@ static const char *menu[] =
   "AVC",
   "SoftMute",
   "Settings",
-  "Waterfall",
 };
 
 //
@@ -949,12 +947,6 @@ static void clickMenu(int cmd, bool shortPress)
       clickScan(true);
       break;
 
-    case MENU_WATERFALL:
-      // Launch the full-screen scrolling waterfall (blocking until exit)
-      currentCmd = CMD_WATERFALL;
-      waterfallRun();
-      currentCmd = CMD_NONE;
-      break;
   }
 }
 
@@ -1269,42 +1261,6 @@ static void drawScan(int x, int y, int sx)
   spr.drawLine(40+x+(sx/2)-4, 66+y+5, 40+x+(sx/2), 66+y-16+5, TH.menu_param);
   spr.drawLine(40+x+(sx/2), 66+y-16+5, 40+x+(sx/2)+4, 66+y+5, TH.menu_param);
   spr.drawLine(40+x+(sx/2)+4, 66+y+5, 40+x+(sx/2)+17, 66+y+5, TH.menu_param);
-}
-
-// Waterfall sidebar icon: 5 rows of heat-gradient bars representing the
-// cold (blue) → hot (red) RSSI colour scale, with a time-arrow on the left.
-static void drawWaterfallMenu(int x, int y, int sx)
-{
-  drawCommon(menu[MENU_WATERFALL], x, y, sx);
-
-  // Heat-gradient bar colours (cold → hot)
-  static const uint16_t kHeat[5] = {
-    0x000F,  // dark blue  (0 % RSSI)
-    0x03FF,  // cyan        (25 %)
-    0x07E0,  // green       (50 %)
-    0xFFE0,  // yellow      (75 %)
-    0xF800,  // red         (100 %)
-  };
-
-  const int cx  = 40 + x + (sx / 2);
-  const int cy  = 66 + y;
-  const int iw  = 42;   // icon width
-  const int bh  = 6;    // height of each gradient band
-  const int ih  = bh * 5;
-
-  // Draw 5 horizontal heat bands (oldest=top / coldest, newest=bottom / hottest)
-  for (int b = 0; b < 5; b++) {
-    spr.fillRect(cx - iw / 2, cy - ih / 2 + b * bh, iw, bh, kHeat[b]);
-  }
-  // Border
-  spr.drawRect(cx - iw / 2 - 1, cy - ih / 2 - 1, iw + 2, ih + 2, TH.menu_param);
-
-  // Down-arrow on the left indicating time flows downward
-  int ax = cx - iw / 2 - 7;
-  spr.drawFastVLine(ax, cy - ih / 2, ih, TH.menu_param);
-  spr.fillTriangle(ax - 3, cy + ih / 2 - 1,
-                   ax + 3, cy + ih / 2 - 1,
-                   ax,     cy + ih / 2 + 4, TH.menu_param);
 }
 
 static void drawBand(int x, int y, int sx)
@@ -1860,7 +1816,6 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_UTCOFFSET:  drawUTCOffset(x, y, sx);  break;
     case CMD_SQUELCH:    drawSquelch(x, y, sx);    break;
     case CMD_CPU:        drawCpuDisplay(x, y, sx);    break;
-    case CMD_WATERFALL:  drawWaterfallMenu(x, y, sx); break;
     default:             drawInfo(x, y, sx);           break;
   }
 }

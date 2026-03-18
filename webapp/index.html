@@ -136,6 +136,24 @@
   #specCanvas { display: block; width: 100%; height: 160px; background: var(--lcd-bg); border-radius: 6px; border: 1px solid #1a2a1a; cursor: crosshair; }
   #specTooltip { position: absolute; background: rgba(0,0,0,.9); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 8px; font-family: monospace; font-size: 11px; color: var(--accent); pointer-events: none; display: none; white-space: nowrap; z-index: 10; }
 
+  /* ── Waterfall ── */
+  #waterfallCard { grid-column: 1 / span 2; }
+  #waterfallCard .card-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #btnWfStart { padding: 4px 14px; border: 1px solid var(--accent2); border-radius: 5px; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; }
+  #btnWfStart:hover { background: rgba(0,255,136,.12); }
+  #btnWfStart:disabled { opacity: .4; cursor: default; }
+  #btnWfStop { padding: 4px 14px; border: 1px solid var(--warn); border-radius: 5px; background: transparent; color: var(--warn); cursor: pointer; font-size: 12px; display: none; }
+  #btnWfStop:hover { background: rgba(255,68,68,.12); }
+  .wf-zoom-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font-size: 13px; }
+  .wf-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .wf-zoom-btn:disabled { opacity: .35; cursor: default; }
+  #wfZoomLabel { font-size: 11px; color: var(--muted); min-width: 36px; text-align: center; }
+  #wfStatus { font-size: 11px; color: var(--muted); margin-left: auto; }
+  #wfWrap { position: relative; margin-top: 8px; }
+  #wfCanvas { display: block; width: 100%; height: 200px; background: #000; border-radius: 6px; border: 1px solid #1a2a1a; cursor: crosshair; }
+  #wfOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 6px; }
+  #wfTooltip { position: absolute; background: rgba(0,0,0,.85); border: 1px solid var(--accent2); border-radius: 4px; padding: 3px 8px; font-family: monospace; font-size: 11px; color: var(--accent2); pointer-events: none; display: none; white-space: nowrap; z-index: 10; top: 4px; }
+
   /* ── Log ── */
   #logCard { grid-column: 1 / span 2; }
   #logBox { height: 80px; overflow-y: auto; background: var(--lcd-bg); border-radius: 4px; padding: 6px 8px; font-family: monospace; font-size: 11px; color: #558855; }
@@ -306,6 +324,24 @@
     <canvas id="specCanvas"></canvas>
   </div>
 
+  <!-- ── Waterfall Card ── -->
+  <div class="card" id="waterfallCard">
+    <div class="card-title">
+      <span>Waterfall</span>
+      <button id="btnWfStart">▶ Start</button>
+      <button id="btnWfStop">■ Stop</button>
+      <button class="wf-zoom-btn" id="btnWfZoomIn"  title="Zoom in (narrow band, faster scan)">+</button>
+      <span id="wfZoomLabel">×1</span>
+      <button class="wf-zoom-btn" id="btnWfZoomOut" title="Zoom out (wider band)">−</button>
+      <span id="wfStatus">Inactive</span>
+    </div>
+    <div id="wfWrap">
+      <canvas id="wfCanvas"></canvas>
+      <canvas id="wfOverlay"></canvas>
+      <div id="wfTooltip"></div>
+    </div>
+  </div>
+
   <!-- ── Log Card ── -->
   <div class="card" id="logCard">
     <div class="card-title">Log</div>
@@ -450,6 +486,8 @@ function handleMessage(msg) {
   if(msg.t === 'preset_renamed') { requestPresets(); return; }
   if(msg.t === 'preset_loaded')  { onPresetLoaded(msg); return; }
   if(msg.t === 'err')            { onRemoteError(msg); return; }
+  if(msg.t === 'wf')            { onWfRow(msg); return; }
+  if(msg.t === 'wf_done')       { onWfDone(); return; }
   if(msg.t === 'ack')           { log('ACK: ' + JSON.stringify(msg)); return; }
   log('RX: ' + JSON.stringify(msg));
 }
@@ -1006,6 +1044,226 @@ function setStatus(text, cls) {
   el.textContent = text;
   el.className = cls;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Waterfall
+// ─────────────────────────────────────────────────────────────
+let wfActive   = false;
+let wfMeta     = null;    // {sf, step, n} from first row
+let wfBase     = null;    // full-band window at zoom 0
+let wfZoom     = 0;       // 0 = full band, 1 = ½ span, …
+const WF_ZOOM_MAX = 5;
+
+// Pixel buffer (RGBA) for the waterfall canvas, lazily sized
+let wfBuf      = null;
+let wfImgData  = null;
+let wfCanvasW  = 0;
+let wfCanvasH  = 0;
+let wfMouseX   = -1;      // last known mouse X over canvas
+
+// Map RSSI 0–127 → RGB via blue (cold) → red (hot) heat gradient
+function wfHeat(rssi) {
+  const t = Math.min(1, Math.max(0, rssi / 80));
+  const h = (1 - t) * 240;   // hue: 240° = blue, 0° = red
+  const v = 0.10 + 0.90 * t; // brightness
+  return hsvToRgb(h, 1, v);
+}
+
+function hsvToRgb(h, s, v) {
+  h = ((h % 360) + 360) % 360;
+  const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+  let r=0, g=0, b=0;
+  if     (h < 60)  { r=c; g=x; b=0; }
+  else if(h < 120) { r=x; g=c; b=0; }
+  else if(h < 180) { r=0; g=c; b=x; }
+  else if(h < 240) { r=0; g=x; b=c; }
+  else if(h < 300) { r=x; g=0; b=c; }
+  else             { r=c; g=0; b=x; }
+  return [(r+m)*255|0, (g+m)*255|0, (b+m)*255|0];
+}
+
+function wfInitCanvas() {
+  const canvas = document.getElementById('wfCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth  * dpr | 0;
+  const H = canvas.offsetHeight * dpr | 0;
+  if(W !== wfCanvasW || H !== wfCanvasH || !wfBuf) {
+    canvas.width  = W;
+    canvas.height = H;
+    wfCanvasW = W; wfCanvasH = H;
+    wfBuf     = new Uint8ClampedArray(W * H * 4);
+    wfImgData = new ImageData(wfBuf, W, H);
+    // Match overlay canvas dimensions
+    const ov = document.getElementById('wfOverlay');
+    ov.width = W; ov.height = H;
+    // Fill black
+    for(let i = 0; i < wfBuf.length; i += 4) { wfBuf[i]=0; wfBuf[i+1]=0; wfBuf[i+2]=0; wfBuf[i+3]=255; }
+  }
+}
+
+function onWfRow(msg) {
+  // Update metadata from first row
+  if(msg.sf != null) {
+    wfMeta = {sf: msg.sf, step: msg.step, n: msg.n};
+    if(wfZoom === 0) wfBase = {...wfMeta};
+    document.getElementById('wfStatus').textContent =
+      `${(msg.sf/100).toFixed(1)}–${((msg.sf + msg.step*(msg.n-1))/100).toFixed(1)} ${msg.step >= 100 ? 'MHz' : 'kHz'} step`;
+  }
+  if(!msg.r || !msg.r.length) return;
+
+  wfInitCanvas();
+  if(!wfBuf) return;
+
+  const W = wfCanvasW, H = wfCanvasH;
+  const n = msg.r.length;
+
+  // Scroll existing pixels up by one row
+  wfBuf.copyWithin(0, W * 4);
+  // Fill last row with new data, scaled to canvas width
+  const rowBase = (H - 1) * W * 4;
+  for(let px = 0; px < W; px++) {
+    const di = Math.min(n - 1, Math.round(px * (n - 1) / (W - 1)));
+    const [r,g,b] = wfHeat(msg.r[di]);
+    const off = rowBase + px * 4;
+    wfBuf[off]=r; wfBuf[off+1]=g; wfBuf[off+2]=b; wfBuf[off+3]=255;
+  }
+
+  // Blit to canvas
+  const ctx = document.getElementById('wfCanvas').getContext('2d');
+  ctx.putImageData(wfImgData, 0, 0);
+
+  // Redraw crosshair if mouse is over
+  if(wfMouseX >= 0) drawWfCrosshair(wfMouseX);
+}
+
+function drawWfCrosshair(clientX) {
+  const canvas = document.getElementById('wfCanvas');
+  const ov     = document.getElementById('wfOverlay');
+  const rect   = canvas.getBoundingClientRect();
+  const dpr    = window.devicePixelRatio || 1;
+  const ratio  = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const px     = ratio * ov.width | 0;
+
+  const ctx = ov.getContext('2d');
+  ctx.clearRect(0, 0, ov.width, ov.height);
+
+  // Dashed vertical line
+  ctx.strokeStyle = 'rgba(0,255,200,0.7)';
+  ctx.lineWidth   = 1 * dpr;
+  ctx.setLineDash([4 * dpr, 4 * dpr]);
+  ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, ov.height); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Frequency tooltip
+  if(wfMeta) {
+    const freq = wfMeta.sf + ratio * wfMeta.step * (wfMeta.n - 1);
+    const tip  = document.getElementById('wfTooltip');
+    const label = freq >= 100000
+      ? (freq / 100).toFixed(3) + ' MHz'
+      : freq.toFixed(0) + ' kHz';
+    tip.textContent = label;
+    tip.style.display = 'block';
+    const cardRect = canvas.closest('.card').getBoundingClientRect();
+    const tx = Math.min(clientX - cardRect.left + 12, cardRect.width - 120);
+    tip.style.left = tx + 'px';
+  }
+}
+
+function clearWfCrosshair() {
+  const ov  = document.getElementById('wfOverlay');
+  const ctx = ov.getContext('2d');
+  ctx.clearRect(0, 0, ov.width, ov.height);
+  document.getElementById('wfTooltip').style.display = 'none';
+}
+
+function onWfDone() {
+  wfActive = false;
+  document.getElementById('btnWfStart').style.display = '';
+  document.getElementById('btnWfStop').style.display  = 'none';
+  document.getElementById('wfStatus').textContent = 'Stopped';
+  log('Waterfall session ended by device');
+}
+
+function wfZoomWindow() {
+  // Return {sf, step, n} for current zoom level derived from wfBase
+  if(!wfBase) return null;
+  const fullSpan = wfBase.step * (wfBase.n - 1);
+  const span     = (wfZoom === 0) ? fullSpan : (fullSpan >> wfZoom);
+  const center   = wfBase.sf + fullSpan / 2;
+  let   sf       = Math.round(center - span / 2);
+  const n        = Math.max(4, wfBase.n >> wfZoom) | 0;
+  if(sf < wfBase.sf) sf = wfBase.sf;
+  return {sf, step: wfBase.step, n};
+}
+
+async function wfSendStart() {
+  if(!rxChar) return;
+  let params = {cmd: 'wf_start'};
+  if(wfBase && wfZoom > 0) {
+    const w = wfZoomWindow();
+    if(w) { params.sf = w.sf; params.step = w.step; params.n = w.n; }
+  }
+  await send(params);
+}
+
+document.getElementById('btnWfStart').addEventListener('click', async () => {
+  if(!rxChar) { log('Not connected', 'err'); return; }
+  wfActive = true;
+  wfMeta   = null;
+  // Clear canvas
+  if(wfBuf) { for(let i=0; i<wfBuf.length; i+=4) { wfBuf[i]=0; wfBuf[i+1]=0; wfBuf[i+2]=0; wfBuf[i+3]=255; } }
+  wfInitCanvas();
+  document.getElementById('btnWfStart').style.display = 'none';
+  document.getElementById('btnWfStop').style.display  = '';
+  document.getElementById('wfStatus').textContent = 'Streaming…';
+  await wfSendStart();
+  log('Waterfall started');
+});
+
+document.getElementById('btnWfStop').addEventListener('click', async () => {
+  // Send any byte to the firmware to trigger its stream->available() exit
+  if(rxChar) await send({cmd: 'wf_stop'});
+  onWfDone();
+});
+
+document.getElementById('btnWfZoomIn').addEventListener('click', async () => {
+  if(wfZoom >= WF_ZOOM_MAX) return;
+  if(!wfBase && wfMeta) wfBase = {...wfMeta};
+  wfZoom++;
+  updateWfZoomLabel();
+  if(wfActive) await wfSendStart();
+});
+
+document.getElementById('btnWfZoomOut').addEventListener('click', async () => {
+  if(wfZoom <= 0) return;
+  wfZoom--;
+  updateWfZoomLabel();
+  if(wfActive) await wfSendStart();
+});
+
+function updateWfZoomLabel() {
+  document.getElementById('wfZoomLabel').textContent = wfZoom === 0 ? '×1' : '×' + (1 << wfZoom);
+  document.getElementById('btnWfZoomOut').disabled = wfZoom === 0;
+  document.getElementById('btnWfZoomIn').disabled  = wfZoom >= WF_ZOOM_MAX;
+}
+updateWfZoomLabel();
+
+// Mouse tracking for crosshair
+const wfWrap = document.getElementById('wfWrap');
+wfWrap.addEventListener('mousemove', e => {
+  wfMouseX = e.clientX;
+  drawWfCrosshair(e.clientX);
+});
+wfWrap.addEventListener('mouseleave', () => {
+  wfMouseX = -1;
+  clearWfCrosshair();
+});
+
+// Resize: reinit canvas dimensions
+window.addEventListener('resize', () => {
+  wfCanvasW = 0; // force reinit on next row
+  if(scanData) drawSpectrum();
+});
 </script>
 </body>
 </html>
