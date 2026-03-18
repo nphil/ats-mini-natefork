@@ -142,8 +142,13 @@
   #btnWfStart { padding: 4px 14px; border: 1px solid var(--accent2); border-radius: 5px; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; }
   #btnWfStart:hover { background: rgba(0,255,136,.12); }
   #btnWfStart:disabled { opacity: .4; cursor: default; }
-  #btnWfStop { padding: 4px 14px; border: 1px solid var(--warn); border-radius: 5px; background: transparent; color: var(--warn); cursor: pointer; font-size: 12px; display: none; }
+  #btnWfStop { padding: 4px 14px; border: 1px solid var(--warn); border-radius: 5px; background: transparent; color: var(--warn); cursor: pointer; font-size: 12px; }
   #btnWfStop:hover { background: rgba(255,68,68,.12); }
+  .wf-freq-input { width: 90px; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px 6px; font-size: 12px; }
+  .wf-freq-input:focus { outline: none; border-color: var(--accent); }
+  #wfControls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+  #wfRangeRow  { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  #wfFreqUnit  { font-size: 11px; color: var(--muted); }
   .wf-zoom-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font-size: 13px; }
   .wf-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
   .wf-zoom-btn:disabled { opacity: .35; cursor: default; }
@@ -329,11 +334,30 @@
     <div class="card-title">
       <span>Waterfall</span>
       <button id="btnWfStart">▶ Start</button>
-      <button id="btnWfStop">■ Stop</button>
-      <button class="wf-zoom-btn" id="btnWfZoomIn"  title="Zoom in (narrow band, faster scan)">+</button>
+      <button id="btnWfStop" style="display:none">■ Stop</button>
+      <button class="wf-zoom-btn" id="btnWfZoomIn"  title="Zoom in — narrows band, fewer points, faster rows">+</button>
       <span id="wfZoomLabel">×1</span>
-      <button class="wf-zoom-btn" id="btnWfZoomOut" title="Zoom out (wider band)">−</button>
+      <button class="wf-zoom-btn" id="btnWfZoomOut" title="Zoom out — wider band">−</button>
       <span id="wfStatus">Inactive</span>
+    </div>
+    <div id="wfControls">
+      <span class="setting-label">Band</span>
+      <button class="btn" id="btnWfBandDown">◀</button>
+      <span class="setting-val" id="wfBandVal">---</span>
+      <button class="btn" id="btnWfBandUp">▶</button>
+      <span class="setting-label" style="margin-left:10px">Mode</span>
+      <button class="btn" id="btnWfModeDown">◀</button>
+      <span class="setting-val" id="wfModeVal">---</span>
+      <button class="btn" id="btnWfModeUp">▶</button>
+    </div>
+    <div id="wfRangeRow">
+      <span class="setting-label">Start</span>
+      <input type="number" id="wfStartFreq" class="wf-freq-input" step="0.01" placeholder="e.g. 87.5">
+      <span class="setting-label">End</span>
+      <input type="number" id="wfEndFreq"   class="wf-freq-input" step="0.01" placeholder="e.g. 108.0">
+      <span id="wfFreqUnit">MHz</span>
+      <button class="btn primary" id="btnWfApply">Apply Range</button>
+      <button class="btn" id="btnWfReset" title="Reset to full band">Reset</button>
     </div>
     <div id="wfWrap">
       <canvas id="wfCanvas"></canvas>
@@ -488,6 +512,7 @@ function handleMessage(msg) {
   if(msg.t === 'err')            { onRemoteError(msg); return; }
   if(msg.t === 'wf')            { onWfRow(msg); return; }
   if(msg.t === 'wf_done')       { onWfDone(); return; }
+  if(msg.t === 'ack' && msg.cmd === 'wf_start') { onWfAck(msg); return; }
   if(msg.t === 'ack')           { log('ACK: ' + JSON.stringify(msg)); return; }
   log('RX: ' + JSON.stringify(msg));
 }
@@ -672,9 +697,12 @@ function updateStatus(s) {
     psChunks = []; psLastChunk = ''; // reset accumulator when leaving FM
   }
 
-  // Settings labels
-  document.getElementById('valBand').textContent = s.bn || '---';
-  document.getElementById('valMode').textContent = s.mn || '---';
+  // Settings labels (main card + waterfall card mirrors)
+  document.getElementById('valBand').textContent  = s.bn || '---';
+  document.getElementById('valMode').textContent  = s.mn || '---';
+  document.getElementById('wfBandVal').textContent = s.bn || '---';
+  document.getElementById('wfModeVal').textContent = s.mn || '---';
+  wfUpdateFreqUnit();
   document.getElementById('valStep').textContent = s.st || '---';
   document.getElementById('valBW').textContent   = s.bw || '---';
   document.getElementById('valAGC').textContent  = `${s.agc ?? '--'}`;
@@ -1048,233 +1076,281 @@ function setStatus(text, cls) {
 // ─────────────────────────────────────────────────────────────
 // Waterfall
 // ─────────────────────────────────────────────────────────────
-let wfActive          = false;
-let wfPendingRestart  = false; // true when zoom change triggered a restart
-let wfMeta            = null;  // {sf, step, n} from most recent first row
-let wfBase            = null;  // full-band window (reference for zoom math)
-let wfZoom            = 0;     // 0 = full band, 1 = ½ span, …
-const WF_ZOOM_MAX     = 5;
+let wfActive         = false;
+let wfPendingRestart = false;  // true when a zoom/band/range restart is in flight
+let wfMeta           = null;   // {sf,step,n} from most recent first row
+let wfBase           = null;   // full-band reference window for zoom math
+let wfCustomWindow   = null;   // user-specified manual range {sf,step,n}
+let wfZoom           = 0;      // 0=full band, 1=½ span, 2=¼ …
+const WF_ZOOM_MAX    = 5;
 
-// Pixel buffer (RGBA) for the waterfall canvas, lazily sized
-let wfBuf      = null;
-let wfImgData  = null;
-let wfCanvasW  = 0;
-let wfCanvasH  = 0;
-let wfMouseX   = -1;      // last known mouse X over canvas
+// Pixel buffer
+let wfBuf=null, wfImgData=null, wfCanvasW=0, wfCanvasH=0, wfMouseX=-1;
 
-// Map RSSI 0–127 → RGB via blue (cold) → red (hot) heat gradient
+// Map RSSI 0–127 → RGB heat gradient blue→red
 function wfHeat(rssi) {
   const t = Math.min(1, Math.max(0, rssi / 80));
-  const h = (1 - t) * 240;   // hue: 240° = blue, 0° = red
-  const v = 0.10 + 0.90 * t; // brightness
-  return hsvToRgb(h, 1, v);
+  return hsvToRgb((1-t)*240, 1, 0.10+0.90*t);
+}
+function hsvToRgb(h, s, v) {
+  h = ((h%360)+360)%360;
+  const c=v*s, x=c*(1-Math.abs((h/60)%2-1)), m=v-c;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}
+  else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}
+  return [(r+m)*255|0,(g+m)*255|0,(b+m)*255|0];
 }
 
-function hsvToRgb(h, s, v) {
-  h = ((h % 360) + 360) % 360;
-  const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
-  let r=0, g=0, b=0;
-  if     (h < 60)  { r=c; g=x; b=0; }
-  else if(h < 120) { r=x; g=c; b=0; }
-  else if(h < 180) { r=0; g=c; b=x; }
-  else if(h < 240) { r=0; g=x; b=c; }
-  else if(h < 300) { r=x; g=0; b=c; }
-  else             { r=c; g=0; b=x; }
-  return [(r+m)*255|0, (g+m)*255|0, (b+m)*255|0];
+function wfIsFM() { return lastStatus.m === 0; }
+// Convert internal freq unit → display string
+function wfFmtFreq(f) {
+  return wfIsFM() ? (f/100).toFixed(2)+' MHz' : f+' kHz';
+}
+// Convert internal freq → value for the number inputs
+function wfToInput(f) { return wfIsFM() ? (f/100) : f; }
+// Convert input value → internal freq unit
+function wfFromInput(v) { return wfIsFM() ? Math.round(v*100) : Math.round(v); }
+
+function wfUpdateFreqUnit() {
+  const unit = wfIsFM() ? 'MHz' : 'kHz';
+  document.getElementById('wfFreqUnit').textContent = unit;
+  document.getElementById('wfStartFreq').placeholder = wfIsFM() ? 'e.g. 87.5' : 'e.g. 530';
+  document.getElementById('wfEndFreq').placeholder   = wfIsFM() ? 'e.g. 108.0' : 'e.g. 1700';
 }
 
 function wfInitCanvas() {
   const canvas = document.getElementById('wfCanvas');
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.offsetWidth  * dpr | 0;
-  const H = canvas.offsetHeight * dpr | 0;
-  if(W !== wfCanvasW || H !== wfCanvasH || !wfBuf) {
-    canvas.width  = W;
-    canvas.height = H;
-    wfCanvasW = W; wfCanvasH = H;
-    wfBuf     = new Uint8ClampedArray(W * H * 4);
-    wfImgData = new ImageData(wfBuf, W, H);
-    // Match overlay canvas dimensions
-    const ov = document.getElementById('wfOverlay');
-    ov.width = W; ov.height = H;
-    // Fill black
-    for(let i = 0; i < wfBuf.length; i += 4) { wfBuf[i]=0; wfBuf[i+1]=0; wfBuf[i+2]=0; wfBuf[i+3]=255; }
+  const dpr = window.devicePixelRatio||1;
+  const W = canvas.offsetWidth*dpr|0, H = canvas.offsetHeight*dpr|0;
+  if(W!==wfCanvasW||H!==wfCanvasH||!wfBuf) {
+    canvas.width=W; canvas.height=H;
+    wfCanvasW=W; wfCanvasH=H;
+    wfBuf=new Uint8ClampedArray(W*H*4);
+    wfImgData=new ImageData(wfBuf,W,H);
+    const ov=document.getElementById('wfOverlay'); ov.width=W; ov.height=H;
+    for(let i=0;i<wfBuf.length;i+=4){wfBuf[i]=0;wfBuf[i+1]=0;wfBuf[i+2]=0;wfBuf[i+3]=255;}
+  }
+}
+
+// Called when firmware acks wf_start (before first row arrives)
+function onWfAck(msg) {
+  if(msg.sf==null) return;
+  // Use ack params to seed wfBase immediately so zoom can work
+  // even if user started with zoom>0 before any data arrived
+  if(!wfBase && !wfCustomWindow) {
+    wfBase = {sf:msg.sf, step:msg.step, n:msg.n};
+    if(wfZoom > 0 && wfActive) {
+      // Restart immediately with correct zoomed window
+      wfPendingRestart = true;
+      wfSendStart();
+    }
   }
 }
 
 function onWfRow(msg) {
-  // First row of a new session carries metadata
   if(msg.sf != null) {
-    wfMeta = {sf: msg.sf, step: msg.step, n: msg.n};
-    // Set wfBase from the full-band session (zoom 0), or if we have nothing yet
-    if(!wfBase || wfZoom === 0) wfBase = {...wfMeta};
-    // If this row arrived after a zoom-triggered restart, clear the pending flag
+    wfMeta = {sf:msg.sf, step:msg.step, n:msg.n};
+    // Establish full-band base from zoom-0 sessions (or first ever)
+    if(!wfBase && !wfCustomWindow) {
+      wfBase = {...wfMeta};
+      // If zoom was preset but base was unknown, restart with zoomed params now
+      if(wfZoom > 0 && wfActive) {
+        wfPendingRestart = true;
+        wfSendStart();
+        return;
+      }
+    }
     wfPendingRestart = false;
-    const endFreq = msg.sf + msg.step * (msg.n - 1);
-    const isFM = lastStatus.m === 0;
-    const fmt = f => isFM ? (f/100).toFixed(2)+' MHz' : f+' kHz';
+    const endFreq = msg.sf + msg.step*(msg.n-1);
     document.getElementById('wfStatus').textContent =
-      `n=${msg.n} · ${fmt(msg.sf)}–${fmt(endFreq)}`;
+      `n=${msg.n} · ${wfFmtFreq(msg.sf)}–${wfFmtFreq(endFreq)}`;
   }
-  if(!msg.r || !msg.r.length) return;
+  if(!msg.r||!msg.r.length) return;
 
   wfInitCanvas();
   if(!wfBuf) return;
-
-  const W = wfCanvasW, H = wfCanvasH;
-  const n = msg.r.length;
-
-  // Scroll existing pixels up by one row
-  wfBuf.copyWithin(0, W * 4);
-  // Fill last row with new data, scaled to canvas width
-  const rowBase = (H - 1) * W * 4;
-  for(let px = 0; px < W; px++) {
-    const di = Math.min(n - 1, Math.round(px * (n - 1) / (W - 1)));
-    const [r,g,b] = wfHeat(msg.r[di]);
-    const off = rowBase + px * 4;
-    wfBuf[off]=r; wfBuf[off+1]=g; wfBuf[off+2]=b; wfBuf[off+3]=255;
+  const W=wfCanvasW, H=wfCanvasH, n=msg.r.length;
+  wfBuf.copyWithin(0, W*4);
+  const rowBase=(H-1)*W*4;
+  for(let px=0;px<W;px++) {
+    const di=Math.min(n-1, Math.round(px*(n-1)/(W-1)));
+    const [r,g,b]=wfHeat(msg.r[di]);
+    const off=rowBase+px*4;
+    wfBuf[off]=r;wfBuf[off+1]=g;wfBuf[off+2]=b;wfBuf[off+3]=255;
   }
-
-  // Blit to canvas
-  const ctx = document.getElementById('wfCanvas').getContext('2d');
-  ctx.putImageData(wfImgData, 0, 0);
-
-  // Redraw crosshair if mouse is over
-  if(wfMouseX >= 0) drawWfCrosshair(wfMouseX);
+  document.getElementById('wfCanvas').getContext('2d').putImageData(wfImgData,0,0);
+  if(wfMouseX>=0) drawWfCrosshair(wfMouseX);
 }
 
 function drawWfCrosshair(clientX) {
-  const canvas = document.getElementById('wfCanvas');
-  const ov     = document.getElementById('wfOverlay');
-  const rect   = canvas.getBoundingClientRect();
-  const dpr    = window.devicePixelRatio || 1;
-  const ratio  = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  const px     = ratio * ov.width | 0;
-
-  const ctx = ov.getContext('2d');
-  ctx.clearRect(0, 0, ov.width, ov.height);
-
-  // Dashed vertical line
-  ctx.strokeStyle = 'rgba(0,255,200,0.7)';
-  ctx.lineWidth   = 1 * dpr;
-  ctx.setLineDash([4 * dpr, 4 * dpr]);
-  ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, ov.height); ctx.stroke();
+  const canvas=document.getElementById('wfCanvas');
+  const ov=document.getElementById('wfOverlay');
+  const rect=canvas.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  const ratio=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+  const px=ratio*ov.width|0;
+  const ctx=ov.getContext('2d');
+  ctx.clearRect(0,0,ov.width,ov.height);
+  ctx.strokeStyle='rgba(0,255,200,0.7)'; ctx.lineWidth=1*dpr;
+  ctx.setLineDash([4*dpr,4*dpr]);
+  ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,ov.height); ctx.stroke();
   ctx.setLineDash([]);
-
-  // Frequency tooltip
   if(wfMeta) {
-    const freq = wfMeta.sf + ratio * wfMeta.step * (wfMeta.n - 1);
-    const tip  = document.getElementById('wfTooltip');
-    const label = freq >= 100000
-      ? (freq / 100).toFixed(3) + ' MHz'
-      : freq.toFixed(0) + ' kHz';
-    tip.textContent = label;
-    tip.style.display = 'block';
-    const cardRect = canvas.closest('.card').getBoundingClientRect();
-    const tx = Math.min(clientX - cardRect.left + 12, cardRect.width - 120);
-    tip.style.left = tx + 'px';
+    const freq=wfMeta.sf+ratio*wfMeta.step*(wfMeta.n-1);
+    const tip=document.getElementById('wfTooltip');
+    tip.textContent=wfFmtFreq(freq);
+    tip.style.display='block';
+    const cardRect=canvas.closest('.card').getBoundingClientRect();
+    tip.style.left=Math.min(clientX-cardRect.left+12,cardRect.width-120)+'px';
   }
 }
-
 function clearWfCrosshair() {
-  const ov  = document.getElementById('wfOverlay');
-  const ctx = ov.getContext('2d');
-  ctx.clearRect(0, 0, ov.width, ov.height);
-  document.getElementById('wfTooltip').style.display = 'none';
+  const ov=document.getElementById('wfOverlay');
+  ov.getContext('2d').clearRect(0,0,ov.width,ov.height);
+  document.getElementById('wfTooltip').style.display='none';
+}
+
+function wfSetActive(active) {
+  wfActive=active;
+  document.getElementById('btnWfStart').style.display = active ? 'none'         : 'inline-block';
+  document.getElementById('btnWfStop').style.display  = active ? 'inline-block' : 'none';
 }
 
 function onWfDone() {
-  // Ignore wf_done that was triggered by a zoom-change restart;
-  // the firmware immediately picks up the new wf_start from the BLE buffer.
+  // A zoom/band/range restart sends wf_stop internally; ignore that wf_done
   if(wfPendingRestart) return;
-
-  wfActive = false;
-  document.getElementById('btnWfStart').style.display = '';
-  document.getElementById('btnWfStop').style.display  = 'none';
+  wfSetActive(false);
   document.getElementById('wfStatus').textContent = 'Stopped — encoder pressed';
   log('Waterfall session ended by device');
 }
 
-function wfZoomWindow() {
-  // Return {sf, step, n} for current zoom level derived from wfBase
-  if(!wfBase) return null;
-  const fullSpan = wfBase.step * (wfBase.n - 1);
-  const span     = (wfZoom === 0) ? fullSpan : (fullSpan >> wfZoom);
-  const center   = wfBase.sf + fullSpan / 2;
-  let   sf       = Math.round(center - span / 2);
-  const n        = Math.max(4, wfBase.n >> wfZoom) | 0;
-  if(sf < wfBase.sf) sf = wfBase.sf;
-  return {sf, step: wfBase.step, n};
+// Compute zoomed window relative to a given base
+function wfZoomWindow(base) {
+  if(!base) return null;
+  const fullSpan = base.step*(base.n-1);
+  const span = wfZoom===0 ? fullSpan : (fullSpan>>wfZoom);
+  const center = base.sf + fullSpan/2;
+  let sf = Math.round(center - span/2);
+  const n = Math.max(4, base.n>>wfZoom)|0;
+  if(sf < base.sf) sf = base.sf;
+  return {sf, step:base.step, n};
 }
 
 async function wfSendStart() {
   if(!rxChar) return;
-  let params = {cmd: 'wf_start'};
-  if(wfBase && wfZoom > 0) {
-    const w = wfZoomWindow();
-    if(w) { params.sf = w.sf; params.step = w.step; params.n = w.n; }
+  let params = {cmd:'wf_start'};
+  const base = wfCustomWindow || wfBase;  // custom range takes priority
+  if(base && wfZoom > 0) {
+    const w = wfZoomWindow(base);
+    if(w) { params.sf=w.sf; params.step=w.step; params.n=w.n; }
+  } else if(base) {
+    // Zoom 0 but explicit range (custom or known base)
+    params.sf=base.sf; params.step=base.step; params.n=base.n;
   }
+  // else bare wf_start → firmware uses current band defaults
   await send(params);
 }
 
-document.getElementById('btnWfStart').addEventListener('click', async () => {
-  if(!rxChar) { log('Not connected', 'err'); return; }
-  wfActive = true;
-  wfMeta   = null;
-  // Clear canvas
-  if(wfBuf) { for(let i=0; i<wfBuf.length; i+=4) { wfBuf[i]=0; wfBuf[i+1]=0; wfBuf[i+2]=0; wfBuf[i+3]=255; } }
+function wfClearCanvas() {
+  if(wfBuf) for(let i=0;i<wfBuf.length;i+=4){wfBuf[i]=0;wfBuf[i+1]=0;wfBuf[i+2]=0;wfBuf[i+3]=255;}
   wfInitCanvas();
-  document.getElementById('btnWfStart').style.display = 'none';
-  document.getElementById('btnWfStop').style.display  = '';
+}
+
+document.getElementById('btnWfStart').addEventListener('click', async () => {
+  if(!rxChar) { log('Not connected','err'); return; }
+  wfMeta=null;
+  wfClearCanvas();
+  wfSetActive(true);
   document.getElementById('wfStatus').textContent = 'Streaming…';
   await wfSendStart();
   log('Waterfall started');
 });
 
 document.getElementById('btnWfStop').addEventListener('click', async () => {
-  wfPendingRestart = false; // explicit stop — don't ignore wf_done
-  if(rxChar) await send({cmd: 'wf_stop'});
-  onWfDone();
+  wfPendingRestart=false;
+  if(rxChar) await send({cmd:'wf_stop'});
+  wfSetActive(false);
+  document.getElementById('wfStatus').textContent = 'Stopped';
 });
 
 document.getElementById('btnWfZoomIn').addEventListener('click', async () => {
-  if(wfZoom >= WF_ZOOM_MAX) return;
-  if(!wfBase && wfMeta) wfBase = {...wfMeta}; // capture reference if not set yet
+  if(wfZoom>=WF_ZOOM_MAX) return;
   wfZoom++;
   updateWfZoomLabel();
-  if(wfActive) { wfPendingRestart = true; await wfSendStart(); }
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
 });
-
 document.getElementById('btnWfZoomOut').addEventListener('click', async () => {
-  if(wfZoom <= 0) return;
+  if(wfZoom<=0) return;
   wfZoom--;
   updateWfZoomLabel();
-  if(wfActive) { wfPendingRestart = true; await wfSendStart(); }
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
 });
 
 function updateWfZoomLabel() {
-  document.getElementById('wfZoomLabel').textContent = wfZoom === 0 ? '×1' : '×' + (1 << wfZoom);
-  document.getElementById('btnWfZoomOut').disabled = wfZoom === 0;
-  document.getElementById('btnWfZoomIn').disabled  = wfZoom >= WF_ZOOM_MAX;
+  document.getElementById('wfZoomLabel').textContent = wfZoom===0 ? '×1' : '×'+(1<<wfZoom);
+  document.getElementById('btnWfZoomOut').disabled = wfZoom===0;
+  document.getElementById('btnWfZoomIn').disabled  = wfZoom>=WF_ZOOM_MAX;
 }
 updateWfZoomLabel();
 
-// Mouse tracking for crosshair
-const wfWrap = document.getElementById('wfWrap');
-wfWrap.addEventListener('mousemove', e => {
-  wfMouseX = e.clientX;
-  drawWfCrosshair(e.clientX);
+// Band/mode controls — mirror the existing freq card controls and restart waterfall
+document.getElementById('btnWfBandDown').addEventListener('click', async () => {
+  await send({cmd:'band',d:-1});
+  wfBase=null; wfCustomWindow=null; // new band = new limits
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
 });
-wfWrap.addEventListener('mouseleave', () => {
-  wfMouseX = -1;
-  clearWfCrosshair();
+document.getElementById('btnWfBandUp').addEventListener('click', async () => {
+  await send({cmd:'band',d:1});
+  wfBase=null; wfCustomWindow=null;
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
+});
+document.getElementById('btnWfModeDown').addEventListener('click', async () => {
+  await send({cmd:'mode',d:-1});
+  wfBase=null; wfCustomWindow=null;
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
+});
+document.getElementById('btnWfModeUp').addEventListener('click', async () => {
+  await send({cmd:'mode',d:1});
+  wfBase=null; wfCustomWindow=null;
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
 });
 
-// Resize: reinit canvas dimensions
-window.addEventListener('resize', () => {
-  wfCanvasW = 0; // force reinit on next row
-  if(scanData) drawSpectrum();
+// Manual frequency range
+document.getElementById('btnWfApply').addEventListener('click', async () => {
+  const startVal = parseFloat(document.getElementById('wfStartFreq').value);
+  const endVal   = parseFloat(document.getElementById('wfEndFreq').value);
+  if(isNaN(startVal)||isNaN(endVal)||endVal<=startVal) {
+    log('Invalid frequency range','err'); return;
+  }
+  const sf   = wfFromInput(startVal);
+  const end  = wfFromInput(endVal);
+  const step = Math.max(1, Math.round((end-sf)/100));
+  const n    = Math.min(200, Math.max(4, Math.round((end-sf)/step)+1));
+  wfCustomWindow = {sf,step,n};
+  wfBase = {...wfCustomWindow}; // zoom operates relative to custom range
+  wfZoom = 0;
+  updateWfZoomLabel();
+  wfClearCanvas();
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
+  log(`Custom range: ${wfFmtFreq(sf)}–${wfFmtFreq(sf+step*(n-1))}, n=${n}, step=${step}`);
 });
+
+document.getElementById('btnWfReset').addEventListener('click', async () => {
+  wfCustomWindow=null; wfBase=null; wfZoom=0;
+  document.getElementById('wfStartFreq').value='';
+  document.getElementById('wfEndFreq').value='';
+  updateWfZoomLabel();
+  wfClearCanvas();
+  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
+});
+
+// Mouse crosshair
+const wfWrap = document.getElementById('wfWrap');
+wfWrap.addEventListener('mousemove', e => { wfMouseX=e.clientX; drawWfCrosshair(e.clientX); });
+wfWrap.addEventListener('mouseleave', () => { wfMouseX=-1; clearWfCrosshair(); });
+
+// Resize
+window.addEventListener('resize', () => { wfCanvasW=0; if(scanData) drawSpectrum(); });
 </script>
 </body>
 </html>
