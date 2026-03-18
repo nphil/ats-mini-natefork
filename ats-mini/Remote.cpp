@@ -808,9 +808,11 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     }
 
     // Save radio state and enter scan mode
+    // Use 15 ms settle time — sufficient for waterfall RSSI accuracy and
+    // much faster than the 100 ms used for the precision band scan.
     uint16_t savedFreq = rx.getFrequency();
     muteOn(MUTE_TEMP, true);
-    rx.setMaxDelaySetFrequency(30);
+    rx.setMaxDelaySetFrequency(15);
     seekStop = false;
 
     static uint8_t  wfRow[200];
@@ -832,14 +834,8 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
         uint8_t r;
         if(freq != lastFreq)
         {
+          // setFrequency() waits internally up to setMaxDelaySetFrequency ms
           rx.setFrequency(freq);
-          uint32_t t0 = millis();
-          while(millis() - t0 < 20)
-          {
-            rx.getStatus(0, 0);
-            if(rx.getTuneCompleteTriggered()) break;
-            delay(2);
-          }
           rx.getCurrentReceivedSignalQuality();
           r = rx.getCurrentRSSI();
           lastFreq = freq;

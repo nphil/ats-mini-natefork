@@ -1048,11 +1048,12 @@ function setStatus(text, cls) {
 // ─────────────────────────────────────────────────────────────
 // Waterfall
 // ─────────────────────────────────────────────────────────────
-let wfActive   = false;
-let wfMeta     = null;    // {sf, step, n} from first row
-let wfBase     = null;    // full-band window at zoom 0
-let wfZoom     = 0;       // 0 = full band, 1 = ½ span, …
-const WF_ZOOM_MAX = 5;
+let wfActive          = false;
+let wfPendingRestart  = false; // true when zoom change triggered a restart
+let wfMeta            = null;  // {sf, step, n} from most recent first row
+let wfBase            = null;  // full-band window (reference for zoom math)
+let wfZoom            = 0;     // 0 = full band, 1 = ½ span, …
+const WF_ZOOM_MAX     = 5;
 
 // Pixel buffer (RGBA) for the waterfall canvas, lazily sized
 let wfBuf      = null;
@@ -1102,12 +1103,18 @@ function wfInitCanvas() {
 }
 
 function onWfRow(msg) {
-  // Update metadata from first row
+  // First row of a new session carries metadata
   if(msg.sf != null) {
     wfMeta = {sf: msg.sf, step: msg.step, n: msg.n};
-    if(wfZoom === 0) wfBase = {...wfMeta};
+    // Set wfBase from the full-band session (zoom 0), or if we have nothing yet
+    if(!wfBase || wfZoom === 0) wfBase = {...wfMeta};
+    // If this row arrived after a zoom-triggered restart, clear the pending flag
+    wfPendingRestart = false;
+    const endFreq = msg.sf + msg.step * (msg.n - 1);
+    const isFM = lastStatus.m === 0;
+    const fmt = f => isFM ? (f/100).toFixed(2)+' MHz' : f+' kHz';
     document.getElementById('wfStatus').textContent =
-      `${(msg.sf/100).toFixed(1)}–${((msg.sf + msg.step*(msg.n-1))/100).toFixed(1)} ${msg.step >= 100 ? 'MHz' : 'kHz'} step`;
+      `n=${msg.n} · ${fmt(msg.sf)}–${fmt(endFreq)}`;
   }
   if(!msg.r || !msg.r.length) return;
 
@@ -1177,10 +1184,14 @@ function clearWfCrosshair() {
 }
 
 function onWfDone() {
+  // Ignore wf_done that was triggered by a zoom-change restart;
+  // the firmware immediately picks up the new wf_start from the BLE buffer.
+  if(wfPendingRestart) return;
+
   wfActive = false;
   document.getElementById('btnWfStart').style.display = '';
   document.getElementById('btnWfStop').style.display  = 'none';
-  document.getElementById('wfStatus').textContent = 'Stopped';
+  document.getElementById('wfStatus').textContent = 'Stopped — encoder pressed';
   log('Waterfall session ended by device');
 }
 
@@ -1221,24 +1232,24 @@ document.getElementById('btnWfStart').addEventListener('click', async () => {
 });
 
 document.getElementById('btnWfStop').addEventListener('click', async () => {
-  // Send any byte to the firmware to trigger its stream->available() exit
+  wfPendingRestart = false; // explicit stop — don't ignore wf_done
   if(rxChar) await send({cmd: 'wf_stop'});
   onWfDone();
 });
 
 document.getElementById('btnWfZoomIn').addEventListener('click', async () => {
   if(wfZoom >= WF_ZOOM_MAX) return;
-  if(!wfBase && wfMeta) wfBase = {...wfMeta};
+  if(!wfBase && wfMeta) wfBase = {...wfMeta}; // capture reference if not set yet
   wfZoom++;
   updateWfZoomLabel();
-  if(wfActive) await wfSendStart();
+  if(wfActive) { wfPendingRestart = true; await wfSendStart(); }
 });
 
 document.getElementById('btnWfZoomOut').addEventListener('click', async () => {
   if(wfZoom <= 0) return;
   wfZoom--;
   updateWfZoomLabel();
-  if(wfActive) await wfSendStart();
+  if(wfActive) { wfPendingRestart = true; await wfSendStart(); }
 });
 
 function updateWfZoomLabel() {
