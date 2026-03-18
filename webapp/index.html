@@ -1132,15 +1132,18 @@ function wfInitCanvas() {
   }
 }
 
-// Called when firmware acks wf_start (before first row arrives)
+// Called when firmware acks wf_start (before first row arrives).
+// Ack carries the actual sf/step/n the firmware will use for this session.
 function onWfAck(msg) {
   if(msg.sf==null) return;
-  // Use ack params to seed wfBase immediately so zoom can work
-  // even if user started with zoom>0 before any data arrived
   if(!wfBase && !wfCustomWindow) {
     wfBase = {sf:msg.sf, step:msg.step, n:msg.n};
+    // Auto-populate range inputs with the real band limits so user can see
+    // (and optionally adjust) the range the firmware will sweep.
+    document.getElementById('wfStartFreq').value = wfToInput(msg.sf);
+    document.getElementById('wfEndFreq').value   = wfToInput(msg.sf + msg.step*(msg.n-1));
     if(wfZoom > 0 && wfActive) {
-      // Restart immediately with correct zoomed window
+      // Zoom was pre-set before base was known — restart with correct window now
       wfPendingRestart = true;
       wfSendStart();
     }
@@ -1293,27 +1296,25 @@ function updateWfZoomLabel() {
 }
 updateWfZoomLabel();
 
-// Band/mode controls — mirror the existing freq card controls and restart waterfall
-document.getElementById('btnWfBandDown').addEventListener('click', async () => {
-  await send({cmd:'band',d:-1});
-  wfBase=null; wfCustomWindow=null; // new band = new limits
-  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
-});
-document.getElementById('btnWfBandUp').addEventListener('click', async () => {
-  await send({cmd:'band',d:1});
+// Band/mode controls — change band/mode on device, then (re)start waterfall so
+// the firmware ack populates Start/End inputs with the new band's real limits.
+async function wfChangeBandMode(cmd, d) {
+  await send({cmd, d});
+  // Clear current window — ack from next wf_start will populate fresh limits
   wfBase=null; wfCustomWindow=null;
-  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
-});
-document.getElementById('btnWfModeDown').addEventListener('click', async () => {
-  await send({cmd:'mode',d:-1});
-  wfBase=null; wfCustomWindow=null;
-  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
-});
-document.getElementById('btnWfModeUp').addEventListener('click', async () => {
-  await send({cmd:'mode',d:1});
-  wfBase=null; wfCustomWindow=null;
-  if(wfActive) { wfPendingRestart=true; await wfSendStart(); }
-});
+  document.getElementById('wfStartFreq').value='';
+  document.getElementById('wfEndFreq').value='';
+  wfClearCanvas();
+  // Mark as restart if already active, otherwise this is a fresh start
+  wfPendingRestart = wfActive;
+  wfSetActive(true);
+  document.getElementById('wfStatus').textContent = 'Streaming…';
+  await wfSendStart(); // bare → firmware uses new band defaults → ack → inputs populated
+}
+document.getElementById('btnWfBandDown').addEventListener('click', () => wfChangeBandMode('band',-1));
+document.getElementById('btnWfBandUp'  ).addEventListener('click', () => wfChangeBandMode('band', 1));
+document.getElementById('btnWfModeDown').addEventListener('click', () => wfChangeBandMode('mode',-1));
+document.getElementById('btnWfModeUp'  ).addEventListener('click', () => wfChangeBandMode('mode', 1));
 
 // Manual frequency range
 document.getElementById('btnWfApply').addEventListener('click', async () => {
