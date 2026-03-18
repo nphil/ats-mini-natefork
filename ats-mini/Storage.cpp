@@ -213,9 +213,9 @@ void prefsSave(uint32_t items)
     prefs.putUChar("FmRegion",    FmRegionIdx);    // FM region
     prefs.putUChar("UILayout",    uiLayoutIdx);    // UI Layout
     prefs.putUChar("BLEMode",     bleModeIdx);     // Bluetooth mode
-    prefs.putUChar("BLEAutoOff",  bleAutoOffIdx);  // BLE auto-off timeout
     prefs.putUChar("USBMode",     usbModeIdx);     // USB mode
     prefs.putUShort("CustomHue",  customThemeHue); // Custom theme hue
+    prefs.putUChar("CPUDisplay",  cpuDisplayIdx);  // CPU usage display
 
     // Done with global settings
     prefs.end();
@@ -289,9 +289,9 @@ bool prefsLoad(uint32_t items)
     FmRegionIdx    = prefs.getUChar("FmRegion", FmRegionIdx);   // FM region
     uiLayoutIdx    = prefs.getUChar("UILayout", uiLayoutIdx);   // UI Layout
     bleModeIdx     = prefs.getUChar("BLEMode",    bleModeIdx);    // Bluetooth mode
-    bleAutoOffIdx  = prefs.getUChar("BLEAutoOff", bleAutoOffIdx); // BLE auto-off timeout
     usbModeIdx     = prefs.getUChar("USBMode",    usbModeIdx);    // USB mode
     customThemeHue = prefs.getUShort("CustomHue", customThemeHue); // Custom theme hue
+    cpuDisplayIdx  = prefs.getUChar("CPUDisplay", 0);              // CPU usage display
 
     // Rebuild Custom theme slot from the loaded hue
     applyCustomTheme(customThemeHue);
@@ -385,4 +385,109 @@ bool nvsErase()
          nvs_flash_init() == ESP_OK &&
          nvs_flash_erase_partition(STORAGE_PARTITION) == ESP_OK &&
          nvs_flash_init_partition(STORAGE_PARTITION) == ESP_OK);
+}
+
+// Check if the NVS partition has at least minEntries free entries.
+// Used to guard writes that would fill storage unexpectedly.
+bool nvsCheckFreeSpace(uint16_t minEntries)
+{
+  nvs_stats_t stats;
+  if(nvs_get_stats(STORAGE_PARTITION, &stats) != ESP_OK) return false;
+  return stats.free_entries >= minEntries;
+}
+
+// Internal packed struct for a saved scan preset
+struct SavedPreset
+{
+  char            name[PRESET_NAME_LEN];
+  uint8_t         bandIdx;
+  ScanChannelList channels;
+};
+
+// Save the current scan channel list as a named preset.
+// Returns false if the preset limit is reached or the write fails.
+bool prefsSavePreset(const char *name)
+{
+  prefs.begin("presets", false, STORAGE_PARTITION);
+  uint8_t count = prefs.getUChar("PrCnt", 0);
+  if(count >= PRESET_MAX) { prefs.end(); return false; }
+
+  SavedPreset p;
+  strncpy(p.name, name, PRESET_NAME_LEN - 1);
+  p.name[PRESET_NAME_LEN - 1] = '\0';
+  p.bandIdx  = bandIdx;
+  p.channels = scanChannels;
+
+  char key[16];
+  sprintf(key, "Pr-%d", count);
+  bool ok = prefs.putBytes(key, &p, sizeof(p)) == sizeof(p);
+  if(ok) prefs.putUChar("PrCnt", count + 1);
+  prefs.end();
+  return ok;
+}
+
+// Return how many presets are currently saved.
+uint8_t prefsGetPresetCount()
+{
+  prefs.begin("presets", true, STORAGE_PARTITION);
+  uint8_t count = prefs.getUChar("PrCnt", 0);
+  prefs.end();
+  return count;
+}
+
+// Load a preset by index. Returns false if not found.
+bool prefsGetPreset(uint8_t idx, char *name, uint8_t nameLen, uint8_t *outBandIdx, ScanChannelList *channels)
+{
+  char key[16];
+  sprintf(key, "Pr-%d", idx);
+  SavedPreset p;
+  prefs.begin("presets", true, STORAGE_PARTITION);
+  bool ok = prefs.getBytes(key, &p, sizeof(p)) == sizeof(p);
+  prefs.end();
+  if(!ok) return false;
+  strncpy(name, p.name, nameLen - 1);
+  name[nameLen - 1] = '\0';
+  *outBandIdx = p.bandIdx;
+  *channels   = p.channels;
+  return true;
+}
+
+// Delete a preset by index, shifting later presets down.
+bool prefsDeletePreset(uint8_t idx)
+{
+  prefs.begin("presets", false, STORAGE_PARTITION);
+  uint8_t count = prefs.getUChar("PrCnt", 0);
+  if(idx >= count) { prefs.end(); return false; }
+  for(uint8_t i = idx; i < count - 1; i++)
+  {
+    char keyFrom[16], keyTo[16];
+    sprintf(keyFrom, "Pr-%d", i + 1);
+    sprintf(keyTo,   "Pr-%d", i);
+    SavedPreset p;
+    if(prefs.getBytes(keyFrom, &p, sizeof(p)) == sizeof(p))
+      prefs.putBytes(keyTo, &p, sizeof(p));
+  }
+  char lastKey[16];
+  sprintf(lastKey, "Pr-%d", count - 1);
+  prefs.remove(lastKey);
+  prefs.putUChar("PrCnt", count - 1);
+  prefs.end();
+  return true;
+}
+
+// Rename a preset by index.
+bool prefsRenamePreset(uint8_t idx, const char *newName)
+{
+  prefs.begin("presets", false, STORAGE_PARTITION);
+  uint8_t count = prefs.getUChar("PrCnt", 0);
+  if(idx >= count) { prefs.end(); return false; }
+  char key[16];
+  sprintf(key, "Pr-%d", idx);
+  SavedPreset p;
+  if(prefs.getBytes(key, &p, sizeof(p)) != sizeof(p)) { prefs.end(); return false; }
+  strncpy(p.name, newName, PRESET_NAME_LEN - 1);
+  p.name[PRESET_NAME_LEN - 1] = '\0';
+  bool ok = prefs.putBytes(key, &p, sizeof(p)) == sizeof(p);
+  prefs.end();
+  return ok;
 }

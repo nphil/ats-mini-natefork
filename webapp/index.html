@@ -41,20 +41,33 @@
 
   /* ── Frequency display ── */
   #freqCard { grid-column: 1; }
-  #freqDisplay { background: var(--lcd-bg); border: 1px solid #1a3a1a; border-radius: 6px; padding: 10px 18px; text-align: center; margin-bottom: 12px; }
-  #freqMain { font-family: 'Courier New', monospace; font-size: 52px; font-weight: bold; color: var(--lcd-text); letter-spacing: 4px; line-height: 1; text-shadow: 0 0 20px rgba(0,255,65,.4); }
-  #freqUnit { font-family: 'Courier New', monospace; font-size: 16px; color: #00aa2a; margin-top: 2px; }
+  #freqDisplay { background: var(--lcd-bg); border: 1px solid #1a3a1a; border-radius: 6px; padding: 8px 6px; display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+  #freqMainWrap { flex: 1; text-align: center; }
+  #freqMain { font-family: 'Courier New', monospace; font-size: 52px; font-weight: bold; color: var(--lcd-text); letter-spacing: 4px; line-height: 1; text-shadow: 0 0 20px rgba(0,255,65,.4); cursor: pointer; user-select: none; }
+  #freqMain:hover { text-shadow: 0 0 30px rgba(0,255,65,.7); }
+  #freqEditInput { background: transparent; border: none; border-bottom: 2px solid var(--accent); color: var(--lcd-text); font-family: 'Courier New', monospace; font-size: 40px; font-weight: bold; letter-spacing: 4px; width: 100%; text-align: center; outline: none; }
+  #freqUnitToggle { display: flex; justify-content: center; gap: 10px; margin-top: 5px; }
+  .unit-opt { font-family: 'Courier New', monospace; font-size: 14px; color: #005a14; cursor: pointer; padding: 2px 8px; border-radius: 3px; transition: color .12s, background .12s; }
+  .unit-opt.active { color: #00cc44; background: rgba(0,170,42,.15); }
+  .freq-step-btn { font-size: 22px; padding: 10px 14px; border: 1px solid #1a3a1a; background: rgba(0,40,0,.5); color: var(--lcd-text); cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: background .12s, border-color .12s; }
+  .freq-step-btn:hover { background: rgba(0,80,0,.6); border-color: var(--accent); }
+  .freq-seek-btn { font-size: 16px; padding: 10px 9px; border: 1px solid #1a2a3a; background: rgba(0,20,50,.5); color: #00aaff; cursor: pointer; border-radius: 4px; flex-shrink: 0; transition: background .12s, border-color .12s; }
+  .freq-seek-btn:hover { background: rgba(0,50,120,.6); border-color: #00aaff; }
+  .freq-seek-btn:disabled { opacity: .35; cursor: default; }
+  #seekStatus { font-size: 10px; color: #00aaff; text-align: center; margin-top: 3px; min-height: 14px; letter-spacing: 1px; }
   #modeInfo  { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px; letter-spacing: 1px; }
+  #rdsInfo { margin-top: 10px; padding: 8px 12px; background: var(--surface2); border-radius: 5px; border: 1px solid var(--border); }
+  #rdsHeader { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+  #rdsStation { font-weight: bold; color: var(--accent); font-size: 15px; letter-spacing: 1px; }
+  #rdsTime { font-family: 'Courier New', monospace; font-size: 14px; color: var(--lcd-text); letter-spacing: 2px; }
+  #rdsType { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  #rdsText { color: var(--text); font-size: 12px; line-height: 1.5; }
 
-  .freq-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .btn-group { display: flex; gap: 4px; }
   .btn { padding: 6px 14px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface2); color: var(--text); cursor: pointer; font-size: 13px; transition: background .12s, border-color .12s; }
   .btn:hover { background: var(--surface); border-color: var(--accent); }
   .btn.primary { border-color: var(--accent); color: var(--accent); }
   .btn.primary:hover { background: rgba(0,212,255,.15); }
   .btn.danger { border-color: var(--warn); color: var(--warn); }
-  #freqInput { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 6px 10px; font-size: 13px; width: 110px; }
-  #freqInput:focus { outline: none; border-color: var(--accent); }
 
   /* ── Radio settings (band/mode/step/BW) ── */
   .setting-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -69,6 +82,8 @@
   .meter-fill { height: 100%; border-radius: 4px; transition: width .3s ease; }
   #rssiBar  { background: linear-gradient(90deg, #00d4ff, #00ff88); width: 0%; }
   #snrBar   { background: linear-gradient(90deg, #ff8800, #ffdd00); width: 0%; }
+  #cpu0Bar  { background: linear-gradient(90deg, #00bfff, #00ffcc); width: 0%; }
+  #cpu1Bar  { background: linear-gradient(90deg, #ff6600, #ffaa00); width: 0%; }
   .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
   .stat-box { background: var(--surface2); border-radius: 5px; padding: 8px; text-align: center; }
   .stat-val { font-size: 20px; font-weight: bold; color: var(--accent); }
@@ -85,13 +100,41 @@
   #batFill { height: 100%; background: var(--accent2); border-radius: 5px; transition: width .5s; }
 
   /* ── Spectrum ── */
-  #spectrumCard { grid-column: 1 / span 2; }
-  #spectrumCard .card-title { display: flex; align-items: center; gap: 10px; }
+  #spectrumCard { grid-column: 1 / span 2; position: relative; }
+  #spectrumCard .card-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   #btnScan { padding: 4px 14px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--accent); cursor: pointer; font-size: 12px; }
   #btnScan:hover { background: rgba(0,212,255,.12); }
   #btnScan:disabled { opacity: .4; cursor: default; }
-  #scanStatus { font-size: 11px; color: var(--muted); }
-  #specCanvas { display: block; width: 100%; height: 160px; background: var(--lcd-bg); border-radius: 6px; border: 1px solid #1a2a1a; }
+  #btnScanReset { padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+  #btnScanReset:hover { border-color: var(--warn); color: var(--warn); }
+  #scanRange { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 4px 6px; font-size: 12px; cursor: pointer; }
+  #scanStatus { font-size: 11px; color: var(--muted); margin-left: auto; }
+  #presetRow { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  #presetName { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 4px 8px; font-size: 12px; width: 160px; }
+  #presetName:focus { outline: none; border-color: var(--accent2); }
+  #presetName::placeholder { color: var(--muted); }
+  #btnSavePreset { padding: 4px 12px; border: 1px solid var(--accent2); border-radius: 5px; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; }
+  #btnSavePreset:hover { background: rgba(0,255,136,.12); }
+  #btnSavePreset:disabled { opacity: .4; cursor: default; }
+  #presetMsg { font-size: 11px; margin-left: 4px; }
+  #presetMsg.ok   { color: var(--accent2); }
+  #presetMsg.err  { color: var(--warn); }
+  #presetList { margin-top: 8px; display: none; }
+  #presetListHeader { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  #btnRefreshPresets { padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+  #btnRefreshPresets:hover { border-color: var(--accent); color: var(--accent); }
+  .preset-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid #1a2a1a; }
+  .preset-name { flex: 1; font-size: 12px; color: var(--text); cursor: text; border-radius: 3px; padding: 1px 3px; }
+  .preset-name[contenteditable=true] { outline: 1px solid var(--accent2); background: var(--surface2); }
+  .preset-ch { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .btn-load-preset { padding: 2px 8px; border: 1px solid var(--accent); border-radius: 4px; background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; }
+  .btn-load-preset:hover { background: rgba(0,212,255,.12); }
+  .btn-del-preset { padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+  .btn-del-preset:hover { border-color: var(--warn); color: var(--warn); }
+  #scanProgress { height: 4px; background: var(--surface2); border-radius: 2px; margin: 6px 0 4px; display: none; }
+  #scanProgressFill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width .4s; }
+  #specCanvas { display: block; width: 100%; height: 160px; background: var(--lcd-bg); border-radius: 6px; border: 1px solid #1a2a1a; cursor: crosshair; }
+  #specTooltip { position: absolute; background: rgba(0,0,0,.9); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 8px; font-family: monospace; font-size: 11px; color: var(--accent); pointer-events: none; display: none; white-space: nowrap; z-index: 10; }
 
   /* ── Log ── */
   #logCard { grid-column: 1 / span 2; }
@@ -117,20 +160,28 @@
   <div class="card" id="freqCard">
     <div class="card-title">Frequency</div>
     <div id="freqDisplay">
-      <div id="freqMain">--- . ---</div>
-      <div id="freqUnit">MHz</div>
+      <button class="freq-seek-btn" id="btnSeekDown" title="Seek down">⏮</button>
+      <button class="freq-step-btn" id="btnFreqDown">◀</button>
+      <div id="freqMainWrap">
+        <div id="freqMain" title="Click to enter frequency">--- . ---</div>
+        <div id="freqUnitToggle">
+          <span class="unit-opt active" data-unit="auto">Auto</span>
+          <span class="unit-opt" data-unit="mhz">MHz</span>
+          <span class="unit-opt" data-unit="khz">kHz</span>
+        </div>
+        <div id="seekStatus"></div>
+      </div>
+      <button class="freq-step-btn" id="btnFreqUp">▶</button>
+      <button class="freq-seek-btn" id="btnSeekUp" title="Seek up">⏭</button>
     </div>
     <div id="modeInfo">BAND: ---  MODE: ---  STEP: ---  BW: ---</div>
-
-    <div style="height:10px"></div>
-
-    <div class="freq-controls">
-      <div class="btn-group">
-        <button class="btn primary" id="btnFreqDown">◀ Step</button>
-        <button class="btn primary" id="btnFreqUp">Step ▶</button>
+    <div id="rdsInfo" style="display:none">
+      <div id="rdsHeader">
+        <div id="rdsStation"></div>
+        <div id="rdsTime"></div>
       </div>
-      <input id="freqInput" type="number" placeholder="Freq (kHz)" />
-      <button class="btn primary" id="btnSetFreq">Go</button>
+      <div id="rdsType"></div>
+      <div id="rdsText"></div>
     </div>
 
     <div style="height:12px"></div>
@@ -179,6 +230,14 @@
       <div class="meter-label"><span>SNR</span><span id="snrVal">0 dB</span></div>
       <div class="meter-bar"><div class="meter-fill" id="snrBar"></div></div>
     </div>
+    <div class="meter-row">
+      <div class="meter-label"><span>CPU Core 0</span><span id="cpu0Val">--%</span></div>
+      <div class="meter-bar"><div class="meter-fill" id="cpu0Bar"></div></div>
+    </div>
+    <div class="meter-row">
+      <div class="meter-label"><span>CPU Core 1</span><span id="cpu1Val">--%</span></div>
+      <div class="meter-bar"><div class="meter-fill" id="cpu1Bar"></div></div>
+    </div>
 
     <div class="stat-grid">
       <div class="stat-box">
@@ -201,7 +260,7 @@
 
     <div class="vol-row">
       <label>Volume</label>
-      <input type="range" id="volSlider" min="0" max="63" value="35">
+      <input type="range" id="volSlider" min="0" max="100" value="55">
       <span id="volVal">35</span>
     </div>
 
@@ -220,9 +279,30 @@
   <div class="card" id="spectrumCard">
     <div class="card-title">
       <span>Spectrum</span>
+      <select id="scanRange">
+        <option value="5">Narrow (1 MHz)</option>
+        <option value="10" selected>Normal (2 MHz)</option>
+        <option value="25">Wide (5 MHz)</option>
+        <option value="50">Full (10 MHz)</option>
+      </select>
       <button id="btnScan">▶ Scan</button>
+      <button id="btnScanReset">✕ Reset</button>
       <span id="scanStatus">No scan data</span>
     </div>
+    <div id="scanProgress"><div id="scanProgressFill"></div></div>
+    <div id="presetRow">
+      <input id="presetName" type="text" placeholder="Preset name…" maxlength="19">
+      <button id="btnSavePreset" disabled>Save Preset</button>
+      <span id="presetMsg"></span>
+    </div>
+    <div id="presetList">
+      <div id="presetListHeader">
+        <span>Saved Presets</span>
+        <button id="btnRefreshPresets">↻ Refresh</button>
+      </div>
+      <div id="presetItems"></div>
+    </div>
+    <div id="specTooltip"></div>
     <canvas id="specCanvas"></canvas>
   </div>
 
@@ -301,6 +381,8 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
     log('Connected to ' + device.name, 'ok');
     // Subscribe to 500 ms status updates
     await send({ cmd:'sub', ms:500 });
+    // Load saved preset list
+    await send({ cmd:'list_presets' });
   } catch(e) {
     log('Connection failed: ' + e.message, 'err');
     setStatus('Error', 'error');
@@ -326,7 +408,7 @@ async function send(obj) {
   if(!rxChar) return;
   try {
     const bytes = enc.encode(JSON.stringify(obj));
-    await rxChar.writeValueWithoutResponse(bytes);
+    await rxChar.writeValue(bytes);
   } catch(e) { log('Send error: ' + e.message, 'err'); }
 }
 
@@ -335,7 +417,11 @@ async function send(obj) {
 // Notifications may be fragmented; reassemble using a rolling buffer.
 // ─────────────────────────────────────────────────────────────
 function onNotify(evt) {
-  rxBuf += dec.decode(evt.target.value);
+  const chunk = dec.decode(evt.target.value);
+  // Skip logging routine status updates (every 500ms) — they'd flood the log
+  if(!chunk.trimStart().startsWith('{"t":"s"'))
+    log('BLE rx (' + chunk.length + ' bytes): ' + chunk.slice(0,80).replace(/[\r\n\0]/g,'·'));
+  rxBuf += chunk;
   let start;
   while((start = rxBuf.indexOf('{')) !== -1) {
     let depth=0, end=-1;
@@ -346,7 +432,7 @@ function onNotify(evt) {
     if(end === -1) break;              // incomplete — wait for more
     const raw = rxBuf.slice(start, end+1);
     rxBuf = rxBuf.slice(end+1);
-    try { handleMessage(JSON.parse(raw)); } catch(_) {}
+    try { handleMessage(JSON.parse(raw)); } catch(e) { log('JSON parse error: ' + e.message + ' | raw: ' + raw.slice(0,80), 'err'); }
   }
   // Discard anything before the first '{' (e.g. CRLF padding)
   const firstBrace = rxBuf.indexOf('{');
@@ -355,35 +441,198 @@ function onNotify(evt) {
 }
 
 function handleMessage(msg) {
-  if(msg.t === 's')    { updateStatus(msg); return; }
-  if(msg.t === 'scan') { updateSpectrum(msg); return; }
-  if(msg.t === 'ack')  { log('ACK: ' + JSON.stringify(msg)); return; }
+  if(msg.t === 's')             { updateStatus(msg); return; }
+  if(msg.t === 'scan')          { updateSpectrum(msg); return; }
+  if(msg.t === 'scan_prog')     { updateScanProgress(msg.pct); return; }
+  if(msg.t === 'preset_saved')   { onPresetSaved(msg); return; }
+  if(msg.t === 'presets')        { renderPresets(msg.list || []); return; }
+  if(msg.t === 'preset_deleted') { requestPresets(); return; }
+  if(msg.t === 'preset_renamed') { requestPresets(); return; }
+  if(msg.t === 'preset_loaded')  { onPresetLoaded(msg); return; }
+  if(msg.t === 'err')            { onRemoteError(msg); return; }
+  if(msg.t === 'ack')           { log('ACK: ' + JSON.stringify(msg)); return; }
   log('RX: ' + JSON.stringify(msg));
 }
 
+function onPresetSaved(msg) {
+  clearTimeout(savePresetTimer);
+  const el = document.getElementById('presetMsg');
+  el.className = 'ok';
+  el.textContent = `Saved "${msg.name}" (#${msg.idx + 1} of ${msg.total})`;
+  document.getElementById('btnSavePreset').disabled = false;
+  setTimeout(() => { el.textContent = ''; el.className = ''; }, 5000);
+  requestPresets();
+}
+
+function requestPresets() {
+  if(rxChar) send({cmd: 'list_presets'});
+}
+
+function renderPresets(list) {
+  const container = document.getElementById('presetItems');
+  const panel = document.getElementById('presetList');
+  container.innerHTML = '';
+  if(!list || list.length === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  list.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'preset-item';
+    row.dataset.idx = p.idx;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'preset-name';
+    nameSpan.textContent = p.name;
+    nameSpan.title = 'Click to rename';
+
+    const chSpan = document.createElement('span');
+    chSpan.className = 'preset-ch';
+    chSpan.textContent = p.ch + ' ch';
+
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'btn-load-preset';
+    loadBtn.textContent = 'Load';
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-del-preset';
+    delBtn.textContent = '✕';
+    delBtn.title = 'Delete preset';
+
+    // Inline rename: click name → editable → enter or blur → save
+    nameSpan.addEventListener('click', () => {
+      nameSpan.contentEditable = 'true';
+      nameSpan.focus();
+      const range = document.createRange();
+      range.selectNodeContents(nameSpan);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    });
+    const commitRename = async () => {
+      nameSpan.contentEditable = 'false';
+      const newName = nameSpan.textContent.trim().slice(0, 19) || p.name;
+      nameSpan.textContent = newName;
+      if(newName !== p.name)
+        await send({cmd: 'rename_preset', idx: p.idx, name: newName});
+    };
+    nameSpan.addEventListener('blur', commitRename);
+    nameSpan.addEventListener('keydown', e => { if(e.key === 'Enter') { e.preventDefault(); nameSpan.blur(); } });
+
+    loadBtn.addEventListener('click', () => send({cmd: 'load_preset', idx: p.idx}));
+    delBtn.addEventListener('click', async () => {
+      if(!confirm(`Delete preset "${p.name}"?`)) return;
+      await send({cmd: 'delete_preset', idx: p.idx});
+    });
+
+    row.append(nameSpan, chSpan, loadBtn, delBtn);
+    container.appendChild(row);
+  });
+}
+
+function onPresetLoaded(msg) {
+  if(scanData && msg.ch) {
+    scanData.ch = msg.ch;
+    drawSpectrum();
+  }
+  log('Loaded preset "' + msg.name + '": ' + (msg.ch || []).length + ' channels highlighted');
+}
+
+function onRemoteError(msg) {
+  log('Device error: ' + msg.msg);
+  if(msg.cmd === 'save_preset') {
+    clearTimeout(savePresetTimer);
+    const el = document.getElementById('presetMsg');
+    el.className = 'err';
+    el.textContent = msg.msg;
+    document.getElementById('btnSavePreset').disabled = false;
+    setTimeout(() => { el.textContent = ''; el.className = ''; }, 6000);
+  }
+}
+
+function updateScanProgress(pct) {
+  document.getElementById('scanProgress').style.display = 'block';
+  document.getElementById('scanProgressFill').style.width = pct + '%';
+  document.getElementById('scanStatus').textContent = 'Scanning… ' + pct + '%';
+}
+
 // ─────────────────────────────────────────────────────────────
+// RDS PS stability filter — matches what car/commercial radios do:
+// only display a PS name once the same 8-char string has been received
+// twice in a row (filters partial receptions and mid-transition garbage).
+// Dynamic PS scrolling stations will still show each stable chunk.
+let psStableValue  = '';   // currently displayed stable PS
+let psPendingValue = '';   // candidate being confirmed
+let psPendingCount = 0;    // how many times we've seen psPendingValue
+let psLastFreq     = -1;
+
+function accumulatePs(ps, freq) {
+  if(freq !== psLastFreq) {
+    psStableValue = ''; psPendingValue = ''; psPendingCount = 0; psLastFreq = freq;
+  }
+  const chunk = ps.trim();
+  if(!chunk) return psStableValue;
+  if(chunk === psPendingValue) {
+    psPendingCount++;
+  } else {
+    psPendingValue = chunk;
+    psPendingCount = 1;
+  }
+  if(psPendingCount >= 2) psStableValue = psPendingValue;
+  return psStableValue;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Frequency unit toggle state: 'auto' | 'mhz' | 'khz'
+let freqDisplayUnit = 'auto';
+
+// Format frequency for display based on current unit setting
+function formatFreq(f, m) {
+  const isFM = (m === 0);
+  const unit = freqDisplayUnit === 'auto' ? (isFM ? 'mhz' : 'khz') : freqDisplayUnit;
+  if(unit === 'mhz') {
+    const mhz = isFM ? f / 100 : f / 1000;
+    return { disp: mhz.toFixed(isFM ? 2 : 3), label: 'MHz' };
+  } else {
+    const khz = isFM ? f * 10 : f;
+    return { disp: khz.toFixed(0), label: 'kHz' };
+  }
+}
+
 // Update UI from status packet
 // ─────────────────────────────────────────────────────────────
 function updateStatus(s) {
   lastStatus = s;
 
+  // Clear seek status indicator when new freq arrives (seek completed)
+  const seekStatusEl = document.getElementById('seekStatus');
+  if(seekStatusEl && seekStatusEl.textContent) {
+    seekStatusEl.textContent = '';
+    document.getElementById('btnSeekUp').disabled   = false;
+    document.getElementById('btnSeekDown').disabled = false;
+  }
+
   // Frequency display
   const f = s.f || 0;
-  const isAM = s.m > 0;           // mode 0=FM, 1=LSB, 2=USB, 3=AM
-  let disp, unit;
-  if(!isAM) {
-    // FM: display as MHz with two decimals
-    disp = (f/100).toFixed(2).padStart(6,' ');
-    unit = 'MHz';
-  } else {
-    // AM/SSB: display as kHz integer
-    disp = f.toString();
-    unit = 'kHz';
+  const freqEl = document.getElementById('freqMain');
+  // Only update if not in edit mode
+  if(!freqEl.querySelector('input')) {
+    const { disp } = formatFreq(f, s.m);
+    freqEl.textContent = disp;
   }
-  document.getElementById('freqMain').textContent = disp;
-  document.getElementById('freqUnit').textContent = unit;
   document.getElementById('modeInfo').textContent =
     `BAND: ${s.bn||'---'}  MODE: ${s.mn||'---'}  STEP: ${s.st||'---'}  BW: ${s.bw||'---'}`;
+
+  // RDS display (FM only)
+  const rdsEl = document.getElementById('rdsInfo');
+  if(s.m === 0 && (s.ps || s.rt || s.pty || s.ct)) {
+    rdsEl.style.display = '';
+    const fullPs = s.ps ? accumulatePs(s.ps, s.f) : '';
+    document.getElementById('rdsStation').textContent = fullPs;
+    document.getElementById('rdsTime').textContent    = s.ct  ? s.ct : '';
+    document.getElementById('rdsType').textContent    = s.pty ? s.pty.trim() : '';
+    document.getElementById('rdsText').textContent    = s.rt  ? s.rt.trim()  : '';
+  } else {
+    rdsEl.style.display = 'none';
+    psChunks = []; psLastChunk = ''; // reset accumulator when leaving FM
+  }
 
   // Settings labels
   document.getElementById('valBand').textContent = s.bn || '---';
@@ -402,6 +651,18 @@ function updateStatus(s) {
   document.getElementById('statRssi').textContent = rssi;
   document.getElementById('statSnr').textContent  = snr;
   document.getElementById('statSeq').textContent  = s.seq ?? '--';
+
+  // CPU meters
+  const cpu0 = s.cpu0 ?? null;
+  const cpu1 = s.cpu1 ?? null;
+  if (cpu0 !== null) {
+    document.getElementById('cpu0Bar').style.width = cpu0 + '%';
+    document.getElementById('cpu0Val').textContent = cpu0 + '%';
+  }
+  if (cpu1 !== null) {
+    document.getElementById('cpu1Bar').style.width = cpu1 + '%';
+    document.getElementById('cpu1Val').textContent = cpu1 + '%';
+  }
 
   // Battery
   if(s.bat != null) {
@@ -426,9 +687,13 @@ function updateStatus(s) {
 // ─────────────────────────────────────────────────────────────
 function updateSpectrum(scan) {
   scanData = scan;
+  document.getElementById('scanProgress').style.display = 'none';
+  document.getElementById('scanProgressFill').style.width = '0%';
+  const endFreq = scan.sf + scan.step * (scan.n - 1);
   document.getElementById('scanStatus').textContent =
-    `${scan.n} pts · ${scan.sf} – ${scan.sf + scan.step*(scan.n-1)} kHz`;
+    `${scan.n} pts · ${(scan.sf/100).toFixed(1)}–${(endFreq/100).toFixed(1)} MHz · click bar to tune`;
   document.getElementById('btnScan').disabled = false;
+  document.getElementById('btnSavePreset').disabled = false;
   drawSpectrum();
 }
 
@@ -472,21 +737,34 @@ function drawSpectrum() {
     ctx.fillRect(i * barW + 0.5, H - h, Math.max(1, barW - 1), h);
   });
 
-  // Channel markers
+  // Peak channel markers — dashed line + triangle + frequency label
   chs.forEach(freq => {
     const i = Math.round((freq - scanData.sf) / scanData.step);
     if(i < 0 || i >= n) return;
     const x = (i + 0.5) * barW;
+    const peakH = (rssi[i] / maxR) * (H - 20);
+
+    // Dashed vertical line
     ctx.strokeStyle = '#00d4ff';
     ctx.lineWidth = 1;
     ctx.setLineDash([3,3]);
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H-20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H - 20); ctx.stroke();
     ctx.setLineDash([]);
-    // Label
+
+    // Upward triangle at peak tip
+    const ty = H - 20 - peakH;
     ctx.fillStyle = '#00d4ff';
-    ctx.font = '9px monospace';
+    ctx.beginPath();
+    ctx.moveTo(x,      ty - 6);
+    ctx.lineTo(x - 4,  ty);
+    ctx.lineTo(x + 4,  ty);
+    ctx.closePath();
+    ctx.fill();
+
+    // Frequency label at top
+    ctx.font = 'bold 9px monospace';
     ctx.textAlign = 'center';
-    const label = (freq/100).toFixed(1);
+    const label = (freq / 100).toFixed(1);
     ctx.fillText(label, x, 10);
   });
 
@@ -517,26 +795,80 @@ window.addEventListener('resize', () => { if(scanData) drawSpectrum(); });
 // ─────────────────────────────────────────────────────────────
 
 // Step tuning
-document.getElementById('btnFreqUp').addEventListener('click',   () => send({cmd:'band', d:0}) /* just get status */ || sendEncoder(1));
-document.getElementById('btnFreqDown').addEventListener('click', () => sendEncoder(-1));
-
 async function sendEncoder(d) {
   // Use 'R'/'r' single-char for precise step tuning (existing protocol)
   if(!rxChar) return;
   const ch = d > 0 ? 'R' : 'r';
-  try { await rxChar.writeValueWithoutResponse(enc.encode(ch)); } catch(e) {}
+  try { await rxChar.writeValue(enc.encode(ch)); } catch(e) {}
 }
-// Override: tune by one step using the encoder sim
-document.getElementById('btnFreqUp').onclick   = () => sendEncoder(1);
-document.getElementById('btnFreqDown').onclick = () => sendEncoder(-1);
+document.getElementById('btnFreqUp').addEventListener('click',   () => sendEncoder(1));
+document.getElementById('btnFreqDown').addEventListener('click', () => sendEncoder(-1));
 
-// Direct frequency entry
-document.getElementById('btnSetFreq').addEventListener('click', () => {
-  const v = parseInt(document.getElementById('freqInput').value);
-  if(v > 0) send({cmd:'freq', val:v});
+// Seek to next station
+async function sendSeek(d) {
+  if(!rxChar) return;
+  const seekStatus = document.getElementById('seekStatus');
+  const btnUp   = document.getElementById('btnSeekUp');
+  const btnDown = document.getElementById('btnSeekDown');
+  btnUp.disabled = true; btnDown.disabled = true;
+  seekStatus.textContent = d > 0 ? 'SEEKING ▶▶' : '◀◀ SEEKING';
+  try {
+    const msg = JSON.stringify({cmd:'seek', d:d});
+    await rxChar.writeValue(enc.encode(msg));
+    // Status update will arrive via notification; wait a moment then re-enable
+    await new Promise(r => setTimeout(r, 8000));
+  } catch(e) {}
+  seekStatus.textContent = '';
+  btnUp.disabled = false; btnDown.disabled = false;
+}
+document.getElementById('btnSeekUp').addEventListener('click',   () => sendSeek(1));
+document.getElementById('btnSeekDown').addEventListener('click', () => sendSeek(-1));
+
+// Unit toggle
+document.querySelectorAll('.unit-opt').forEach(el => {
+  el.addEventListener('click', () => {
+    freqDisplayUnit = el.dataset.unit;
+    document.querySelectorAll('.unit-opt').forEach(o => o.classList.toggle('active', o === el));
+    if(lastStatus) updateStatus(lastStatus);
+  });
 });
-document.getElementById('freqInput').addEventListener('keydown', e => {
-  if(e.key === 'Enter') document.getElementById('btnSetFreq').click();
+
+// Click-to-edit frequency display
+document.getElementById('freqMain').addEventListener('click', function() {
+  if(this.querySelector('input')) return; // already editing
+  const f   = (lastStatus && lastStatus.f) || 0;
+  const m   = (lastStatus && lastStatus.m) || 0;
+  const isFM = (m === 0);
+  const { disp } = formatFreq(f, m);
+  const inp = document.createElement('input');
+  inp.id   = 'freqEditInput';
+  inp.type = 'number';
+  inp.value = disp;
+  inp.step  = (freqDisplayUnit === 'khz' || (freqDisplayUnit === 'auto' && !isFM)) ? '1' : (isFM ? '0.01' : '0.001');
+  this.textContent = '';
+  this.appendChild(inp);
+  inp.focus(); inp.select();
+
+  const commit = () => {
+    const v = parseFloat(inp.value);
+    if(!isNaN(v) && v > 0) {
+      const unit = freqDisplayUnit === 'auto' ? (isFM ? 'mhz' : 'khz') : freqDisplayUnit;
+      let val;
+      if(unit === 'mhz') {
+        val = Math.round(v * (isFM ? 100 : 1000));
+      } else {
+        val = isFM ? Math.round(v / 10) : Math.round(v);
+      }
+      send({cmd:'freq', val});
+    }
+    inp.removeEventListener('blur', commit);
+    if(lastStatus) updateStatus(lastStatus);
+  };
+  inp.addEventListener('keydown', e => {
+    if(e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if(e.key === 'Escape') { inp.removeEventListener('blur', commit); if(lastStatus) updateStatus(lastStatus); }
+  });
+  inp.addEventListener('blur', commit);
 });
 
 // Delta controls (band/mode/step/bw/agc)
@@ -576,10 +908,94 @@ document.getElementById('btnSleep').addEventListener('click', () => {
 // Scan button
 document.getElementById('btnScan').addEventListener('click', async () => {
   if(!rxChar) return;
+  const step = parseInt(document.getElementById('scanRange').value);
   document.getElementById('btnScan').disabled = true;
-  document.getElementById('scanStatus').textContent = 'Scanning… (~10s)';
+  document.getElementById('scanProgress').style.display = 'block';
+  document.getElementById('scanProgressFill').style.width = '0%';
+  document.getElementById('scanStatus').textContent = 'Scanning… 0%';
   scanData = null;
-  await send({cmd:'scan'});
+  await send({cmd:'scan', step});
+});
+
+// Reset button
+document.getElementById('btnScanReset').addEventListener('click', () => {
+  scanData = null;
+  document.getElementById('scanStatus').textContent = 'No scan data';
+  document.getElementById('scanProgress').style.display = 'none';
+  document.getElementById('scanProgressFill').style.width = '0%';
+  document.getElementById('btnScan').disabled = false;
+  document.getElementById('btnSavePreset').disabled = true;
+  document.getElementById('presetMsg').textContent = '';
+  drawSpectrum();
+});
+
+// Save Preset button
+let savePresetTimer = null;
+document.getElementById('btnSavePreset').addEventListener('click', async () => {
+  if(!rxChar || !scanData) return;
+  const nameEl = document.getElementById('presetName');
+  const name = nameEl.value.trim() || 'Preset';
+  const msgEl = document.getElementById('presetMsg');
+  document.getElementById('btnSavePreset').disabled = true;
+  msgEl.className = '';
+  msgEl.textContent = 'Saving…';
+  // Safety timeout: re-enable if no response after 10s
+  clearTimeout(savePresetTimer);
+  savePresetTimer = setTimeout(() => {
+    document.getElementById('btnSavePreset').disabled = false;
+    msgEl.className = 'err';
+    msgEl.textContent = 'No response from device';
+    setTimeout(() => { msgEl.textContent = ''; msgEl.className = ''; }, 5000);
+  }, 10000);
+  log('Sending save_preset: ' + JSON.stringify({cmd: 'save_preset', name}));
+  await send({cmd: 'save_preset', name});
+});
+
+// Refresh presets button
+document.getElementById('btnRefreshPresets').addEventListener('click', requestPresets);
+
+// ─────────────────────────────────────────────────────────────
+// Spectrum canvas interaction
+// ─────────────────────────────────────────────────────────────
+const specCanvas  = document.getElementById('specCanvas');
+const specTooltip = document.getElementById('specTooltip');
+
+function canvasXToFreq(clientX) {
+  if(!scanData) return null;
+  const rect = specCanvas.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return Math.round(scanData.sf + ratio * scanData.step * scanData.n);
+}
+
+function nearestChannel(freq) {
+  const chs = (scanData && scanData.ch) || [];
+  if(!chs.length) return null;
+  const best = chs.reduce((a, b) => Math.abs(b - freq) < Math.abs(a - freq) ? b : a);
+  return Math.abs(best - freq) <= scanData.step * 3 ? best : null;
+}
+
+specCanvas.addEventListener('mousemove', e => {
+  if(!scanData) return;
+  const freq = canvasXToFreq(e.clientX);
+  const ch   = nearestChannel(freq);
+  specTooltip.textContent = ch
+    ? `📻 ${(ch/100).toFixed(2)} MHz — click to tune`
+    : `${(freq/100).toFixed(2)} MHz`;
+  specTooltip.style.display = 'block';
+  const cardRect = specCanvas.closest('.card').getBoundingClientRect();
+  const tx = e.clientX - cardRect.left + 12;
+  specTooltip.style.left = Math.min(tx, cardRect.width - 180) + 'px';
+  specTooltip.style.top  = (e.clientY - cardRect.top - 36) + 'px';
+});
+
+specCanvas.addEventListener('mouseleave', () => { specTooltip.style.display = 'none'; });
+
+specCanvas.addEventListener('click', e => {
+  if(!scanData || !rxChar) return;
+  const freq   = canvasXToFreq(e.clientX);
+  const tuneFreq = nearestChannel(freq) || freq;
+  send({cmd:'freq', val: tuneFreq});
+  log(`Tuning to ${(tuneFreq/100).toFixed(2)} MHz`, 'ok');
 });
 
 // ─────────────────────────────────────────────────────────────

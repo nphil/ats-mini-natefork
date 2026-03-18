@@ -9,6 +9,45 @@
 #include <nvs_flash.h>
 #include <qrcode.h>
 
+void drawSplash()
+{
+  spr.fillSprite(TH.bg);
+
+  // --- Antenna tower (left side, x=60) ---
+  const int ax = 60, atop = 12, abase = 158;
+  uint16_t antCol = TH.text;
+  spr.drawLine(ax, atop, ax, abase, antCol);          // mast
+  spr.drawLine(ax-22, 55, ax+22, 55, antCol);         // crossbar 1
+  spr.drawLine(ax-16, 85, ax+16, 85, antCol);         // crossbar 2
+  spr.drawLine(ax-10, 112, ax+10, 112, antCol);       // crossbar 3
+  spr.drawLine(ax-28, abase, ax+28, abase, antCol);   // base
+  spr.drawLine(ax-28, abase, ax-35, abase+8, antCol); // base foot L
+  spr.drawLine(ax+28, abase, ax+35, abase+8, antCol); // base foot R
+
+  // --- Radio waves (arcs from antenna top, going right) ---
+  uint16_t waveColors[] = { 0x07FF, 0x05DF, 0x039F }; // bright → dim cyan
+  int radii[] = { 22, 40, 58 };
+  for(int i = 0; i < 3; i++) {
+    spr.drawArc(ax, atop, radii[i], radii[i]-3, 300, 60, waveColors[i], TH.bg);
+  }
+
+  // --- Callsign (center-right) ---
+  spr.setFreeFont(&Orbitron_Light_24);
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(0xFFE0, TH.bg);             // yellow
+  spr.drawString("KQ4TXO", 210, 65);
+
+  // --- Subtitle lines ---
+  spr.setTextColor(TH.text, TH.bg);
+  spr.drawString("Ham Radio Controller", 210, 108, 2);
+  spr.setTextColor(TH.text_muted, TH.bg);
+  spr.drawString(RECEIVER_DESC, 210, 126, 2);
+  spr.drawString(getVersion(), 210, 144, 2);
+
+  spr.pushSprite(0, 0);
+  delay(2500);
+}
+
 static void displayQRCode(esp_qrcode_handle_t qrcode)
 {
   int size = esp_qrcode_get_size(qrcode);

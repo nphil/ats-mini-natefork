@@ -103,21 +103,39 @@ void clearStationInfo()
 
 static bool showStationName(const char *stationName, bool isLong = false)
 {
-  if(stationName && strcmp((isLong && bufStationName[0] == 0xFF) ? bufStationName + 1 : bufStationName, stationName))
-  {
-    // If the name is explicitly marked as long, add 0xFF in front of it
-    // This is done to display the EiBi names differently
-    if(isLong)
-    {
+  if(!stationName) return false;
+
+  // For EiBi long names, always update immediately (these come from the database, not RDS)
+  if(isLong) {
+    const char *cur = (bufStationName[0] == 0xFF) ? bufStationName + 1 : bufStationName;
+    if(strcmp(cur, stationName)) {
       bufStationName[0] = 0xFF;
       strcpy(bufStationName + 1, stationName);
+      return true;
     }
-    else
-      strcpy(bufStationName, stationName);
-    return(true);
+    return false;
   }
 
-  return(false);
+  // For RDS PS: require same value twice in a row before committing to bufStationName.
+  // This filters partial receptions (PS arrives 2 chars at a time) and avoids
+  // showing garbage during Dynamic PS transitions.
+  static char psPending[12] = "";
+  static uint8_t psConfirmCount = 0;
+
+  if(strcmp(psPending, stationName) == 0) {
+    psConfirmCount++;
+  } else {
+    strncpy(psPending, stationName, sizeof(psPending)-1);
+    psPending[sizeof(psPending)-1] = '\0';
+    psConfirmCount = 1;
+  }
+
+  if(psConfirmCount >= 2 && strcmp(bufStationName, psPending) != 0) {
+    strcpy(bufStationName, psPending);
+    return true;
+  }
+
+  return false;
 }
 
 static bool showRadioText(const char *radioText, uint8_t width = 32)
@@ -203,8 +221,8 @@ static bool showRdsTime(const char *rdsTime)
   // If NTP time available, do not use RDS time
   if(!rdsTime || ntpIsAvailable()) return(false);
 
-  // The standard RDS time format is “HH:MM”.
-  // or sometimes more complex like “DD.MM.YY,HH:MM”.
+  // The standard RDS time format is ï¿½HH:MMï¿½.
+  // or sometimes more complex like ï¿½DD.MM.YY,HH:MMï¿½.
   const char *timeField = strstr(rdsTime, ":");
 
   // If we find a valid time format...
@@ -223,6 +241,12 @@ static bool showRdsTime(const char *rdsTime)
   return(false);
 }
 
+// Raw RDS buffer accessors â€” always return buffer contents regardless of RDS display mode.
+// Used by BLE/remote reporting so data is available even when RDS is disabled on-screen.
+const char *getRdsPsRaw()  { return bufStationName; }
+const char *getRdsRtRaw()  { return bufRadioText;   }
+const char *getRdsPtyRaw() { return bufProgramInfo;  }
+
 bool checkRds()
 {
   bool needRedraw = false;
@@ -232,11 +256,19 @@ bool checkRds()
 
   if(rx.getRdsReceived() && rx.getRdsSync() && rx.getRdsSyncFound())
   {
-    needRedraw |= (mode & RDS_PS) && showStationName(rx.getRdsStationName());
-    needRedraw |= (mode & RDS_RT) && showRadioText(rx.getRdsVersionCode()? rx.getRdsText2B() : rx.getRdsText2A());
-    needRedraw |= (mode & RDS_PI) && showRdsPiCode(rx.getRdsPI());
-    needRedraw |= (mode & RDS_CT) && showRdsTime(rx.getRdsTime());
-    needRedraw |= (mode & RDS_PT) && showRdsProgramType(rx.getRdsProgramTypeX(), !!(mode & RDS_RBDS));
+    // Always populate buffers so BLE can report RDS regardless of display mode.
+    // Only propagate changes to needRedraw when the corresponding display bit is set.
+    bool psChanged  = showStationName(rx.getRdsStationName());
+    bool rtChanged  = showRadioText(rx.getRdsVersionCode()? rx.getRdsText2B() : rx.getRdsText2A());
+    bool piChanged  = showRdsPiCode(rx.getRdsPI());
+    bool ctChanged  = showRdsTime(rx.getRdsTime());
+    bool ptyChanged = showRdsProgramType(rx.getRdsProgramTypeX(), !!(mode & RDS_RBDS));
+
+    needRedraw |= (mode & RDS_PS) && psChanged;
+    needRedraw |= (mode & RDS_RT) && rtChanged;
+    needRedraw |= (mode & RDS_PI) && piChanged;
+    needRedraw |= (mode & RDS_CT) && ctChanged;
+    needRedraw |= (mode & RDS_PT) && ptyChanged;
   }
 
   // Return TRUE if any RDS information changes

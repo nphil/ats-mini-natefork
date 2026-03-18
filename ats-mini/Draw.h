@@ -33,11 +33,13 @@
 #define BLE_OFFSET_Y     0    // BLE y offset
 
 void drawMessage(const char *msg);
+void drawMessageProgress(const char *msg, uint8_t pct);
 void drawZoomedMenu(const char *text, bool force = false);
 void drawScanGraphs(uint32_t freq);
 void drawScreen(const char *statusLine1 = 0, const char *statusLine2 = 0);
 
 void drawWiFiIndicator(int x, int y);
+void drawCpuBars(int x, int y);
 void drawSaveIndicator(int x, int y);
 void drawBleIndicator(int x, int y);
 void drawBandAndMode(const char *band, const char *mode, int x, int y);
@@ -55,6 +57,7 @@ void drawLayoutSmeter(const char *statusLine1, const char *statusLine2);
 
 void drawAbout();
 void drawAboutHelp(uint8_t arrow);
+void drawSplash();
 
 void drawColorWheel(uint16_t hue);
 

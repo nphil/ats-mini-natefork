@@ -1,10 +1,11 @@
 #include "Common.h"
 #include "Utils.h"
 #include "Menu.h"
+#include "Themes.h"
 
 // Tuning delays after rx.setFrequency()
 #define TUNE_DELAY_DEFAULT 30
-#define TUNE_DELAY_FM      60
+#define TUNE_DELAY_FM      100
 #define TUNE_DELAY_AM_SSB  80
 
 #define SCAN_POLL_TIME    10 // Tuning status polling interval (msecs)
@@ -195,7 +196,7 @@ void scanExtractChannels()
 //
 // Run entire scan once
 //
-void scanRun(uint16_t centerFreq, uint16_t step)
+void scanRun(uint16_t centerFreq, uint16_t step, Stream* stream, ScanProgressFn onProgress)
 {
   // Set tuning delay
   rx.setMaxDelaySetFrequency(currentMode == FM ? TUNE_DELAY_FM : TUNE_DELAY_AM_SSB);
@@ -205,12 +206,195 @@ void scanRun(uint16_t centerFreq, uint16_t step)
   seekStop = false;
   // Save current frequency
   uint16_t curFreq = rx.getFrequency();
-  // Scan the whole range
-  for(scanInit(centerFreq, step) ; scanTickTime(););
+  // Scan the whole range, sending progress updates every 10%
+  uint8_t lastPct = 255;
+  for(scanInit(centerFreq, step); scanTickTime();)
+  {
+    uint8_t pct = (uint8_t)((uint32_t)scanGetCount() * 100 / SCAN_POINTS);
+    if(pct != lastPct && pct % 10 == 0)
+    {
+      if(stream)
+      {
+        char pbuf[48];
+        int plen = snprintf(pbuf, sizeof(pbuf), "{\"t\":\"scan_prog\",\"pct\":%u}\r\n", pct);
+        stream->write((uint8_t*)pbuf, plen);
+      }
+      if(onProgress) onProgress(pct);
+      lastPct = pct;
+    }
+  }
   // Restore current frequency
   rx.setFrequency(curFreq);
   // Unmute the audio
   muteOn(MUTE_TEMP, false);
   // Restore tuning delay
+  rx.setMaxDelaySetFrequency(TUNE_DELAY_DEFAULT);
+}
+
+//
+// Waterfall display
+//
+// 256-entry heat color LUT: index 0 = coldest (dark blue), 255 = hottest (bright red).
+// Built once on first use; stored in RAM (512 bytes).
+//
+static uint16_t heatLUT[256];
+static bool     heatLUTReady = false;
+
+static void buildHeatLUT()
+{
+  if (heatLUTReady) return;
+  for (int i = 0; i < 256; i++) {
+    float v   = i / 255.0f;
+    float hue = 240.0f - v * 240.0f; // 240=blue (cold) → 0=red (hot)
+    float brt = 0.10f + v * 0.90f;   // 0.10 (dark) → 1.00 (bright)
+    heatLUT[i] = hsvToRgb565(hue, 1.0f, brt);
+  }
+  heatLUTReady = true;
+}
+
+// Format a band-unit frequency as a human-readable label.
+// FM units are 10 kHz (e.g. 6400 = 64.0 MHz); AM/SSB units are kHz.
+static void formatWfFreq(char *buf, size_t bufSize, uint16_t freq)
+{
+  if (currentMode == FM) {
+    snprintf(buf, bufSize, "%.1fM", freq / 100.0f);
+  } else if (freq >= 10000) {
+    snprintf(buf, bufSize, "%uM",   (unsigned)(freq / 1000));
+  } else if (freq >= 1000) {
+    snprintf(buf, bufSize, "%.1fM", freq / 1000.0f);
+  } else {
+    snprintf(buf, bufSize, "%uk",   (unsigned)freq);
+  }
+}
+
+// Draw the 12-pixel label strip below the waterfall area (rows 158..169).
+// Clears the strip and prints min / mid / max frequencies.
+static void drawWaterfallLabels(uint16_t bandMin, uint16_t bandMax)
+{
+  const int WFALL_H = 158;
+
+  spr.fillRect(0, WFALL_H, 320, 170 - WFALL_H, TH.bg);
+  spr.drawFastHLine(0, WFALL_H, 320, TH.scale_line);
+
+  char lbl[20];
+
+  spr.setTextColor(TH.scale_text, TH.bg);
+
+  // Min freq — left edge
+  formatWfFreq(lbl, sizeof(lbl), bandMin);
+  spr.setTextDatum(TL_DATUM);
+  spr.drawString(lbl, 2, WFALL_H + 2, 1);
+
+  // Max freq — right edge
+  formatWfFreq(lbl, sizeof(lbl), bandMax);
+  spr.setTextDatum(TR_DATUM);
+  spr.drawString(lbl, 318, WFALL_H + 2, 1);
+
+  // Mid freq — centre
+  formatWfFreq(lbl, sizeof(lbl), (uint16_t)((bandMin + bandMax) / 2));
+  spr.setTextDatum(TC_DATUM);
+  spr.drawString(lbl, 160, WFALL_H + 2, 1);
+}
+
+//
+// Full-screen scrolling waterfall display.
+//
+// Maps the current band (min..max frequency) across the 320-pixel display
+// width.  On each sweep a new pixel row is written at the bottom; older
+// rows scroll upward.  The colour of each pixel encodes the measured RSSI
+// using a cold-blue → hot-red heat map.
+//
+// Performance note: each sweep performs 320 I2C tune+measure cycles at
+// TUNE_DELAY_DEFAULT (30 ms) each, giving roughly a 10-second refresh
+// interval.  Core 1 CPU load will be high while the waterfall is running.
+// This is expected and mirrors the load of scanRun().
+//
+// Exit: press the encoder button or rotate the encoder.
+//
+void waterfallRun()
+{
+  buildHeatLUT();
+
+  const Band    *band   = getCurrentBand();
+  const int      W      = 320;   // display width in pixels
+  const int      WFALL_H = 158;  // waterfall area height (rows 0..157)
+                                  // rows 158..169 = 12-px label strip
+
+  const uint16_t bandMin = band->minimumFreq;
+  const uint16_t bandMax = band->maximumFreq;
+
+  // Use the fast default tune delay for all modes (speed > accuracy for waterfall)
+  rx.setMaxDelaySetFrequency(TUNE_DELAY_DEFAULT);
+
+  muteOn(MUTE_TEMP, true);
+  uint16_t savedFreq = rx.getFrequency();
+  seekStop = false;
+
+  // Access the sprite's raw RGB565 pixel buffer
+  uint16_t *buf = (uint16_t *)spr.getPointer();
+
+  // Clear the waterfall area to black
+  if (buf) {
+    memset(buf, 0, (size_t)W * WFALL_H * sizeof(uint16_t));
+  }
+
+  // Draw the initial label strip and push to display
+  drawWaterfallLabels(bandMin, bandMax);
+  spr.pushSprite(0, 0);
+
+  bool running = true;
+
+  while (running) {
+    // Scroll waterfall up by one row: move rows 1..(WFALL_H-1) → 0..(WFALL_H-2)
+    if (buf) {
+      memmove(buf, buf + W, (size_t)W * (WFALL_H - 1) * sizeof(uint16_t));
+    }
+
+    // Sweep all 320 columns left-to-right
+    for (int x = 0; x < W; x++) {
+      // Map column x linearly to the band frequency range
+      uint16_t freq = (uint16_t)(bandMin + (uint32_t)x * (bandMax - bandMin) / (W - 1));
+
+      // Tune the radio (blocks for TUNE_DELAY_DEFAULT ms internally)
+      rx.setFrequency(freq);
+
+      // Poll for tune-complete (up to 20 ms additional, in 2 ms steps)
+      uint32_t t0 = millis();
+      while (millis() - t0 < 20) {
+        rx.getStatus(0, 0);
+        if (rx.getTuneCompleteTriggered()) break;
+        delay(2);
+      }
+
+      // Read RSSI (0..~120 dBuV from SI4732; scale ×2 to fill the 0-255 LUT)
+      rx.getCurrentReceivedSignalQuality();
+      uint8_t r = rx.getCurrentRSSI();
+      uint8_t idx = (r >= 128) ? 255 : (uint8_t)(r * 2);
+
+      // Write the heat pixel at the bottom row of the waterfall
+      if (buf) {
+        buf[(WFALL_H - 1) * W + x] = heatLUT[idx];
+      }
+
+      // Check for exit: button press or encoder rotation
+      if (digitalRead(ENCODER_PUSH_BUTTON) == LOW) {
+        while (digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(10);
+        running = false;
+        break;
+      }
+      if (seekStop) { running = false; break; }
+
+      // Refresh display every 8 columns (balances visual feedback vs. SPI overhead)
+      if ((x & 7) == 7 || x == W - 1) {
+        drawWaterfallLabels(bandMin, bandMax);
+        spr.pushSprite(0, 0);
+      }
+    }
+  }
+
+  // Restore radio state
+  seekStop = false;
+  rx.setFrequency(savedFreq);
+  muteOn(MUTE_TEMP, false);
   rx.setMaxDelaySetFrequency(TUNE_DELAY_DEFAULT);
 }

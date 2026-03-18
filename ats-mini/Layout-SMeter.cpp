@@ -164,6 +164,10 @@ void drawLayoutSmeter(const char *statusLine1, const char *statusLine2)
   // Draw WiFi icon
   drawWiFiIndicator(has_voltage ? WIFI_OFFSET_X : BATT_OFFSET_X - 13, WIFI_OFFSET_Y);
 
+  // Draw CPU load bars (two 30-px bars, to the left of the WiFi icon)
+  if (cpuDisplayIdx)
+    drawCpuBars(has_voltage ? WIFI_OFFSET_X - 45 : BATT_OFFSET_X - 13 - 45, 2);
+
   // Set font we are going to use
   spr.setFreeFont(&Orbitron_Light_24);
 

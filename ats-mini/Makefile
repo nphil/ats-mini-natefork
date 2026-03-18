@@ -29,7 +29,7 @@ SRC = \
 	$(INO) Utils.cpp Rotary.cpp Button.cpp Draw.cpp Menu.cpp \
 	Station.cpp Battery.cpp Storage.cpp Themes.cpp Remote.cpp \
 	Network.cpp EIBI.cpp Scan.cpp About.cpp Ble.cpp \
-	Layout-Default.cpp Layout-SMeter.cpp
+	Layout-Default.cpp Layout-SMeter.cpp CPU.cpp
 
 all: build
 

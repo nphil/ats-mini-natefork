@@ -87,6 +87,7 @@ Band *getCurrentBand() { return(&bands[bandIdx]); }
 #define MENU_AVC         10
 #define MENU_SOFTMUTE    11
 #define MENU_SETTINGS    12
+#define MENU_WATERFALL   13
 
 int8_t menuIdx = MENU_VOLUME;
 
@@ -105,6 +106,7 @@ static const char *menu[] =
   "AVC",
   "SoftMute",
   "Settings",
+  "Waterfall",
 };
 
 //
@@ -125,9 +127,9 @@ static const char *menu[] =
 #define MENU_LOADEIBI     11
 #define MENU_USBMODE      12
 #define MENU_BLEMODE      13
-#define MENU_BLE_AUTOOFF  14
-#define MENU_WIFIMODE     15
-#define MENU_ABOUT        16
+#define MENU_WIFIMODE     14
+#define MENU_ABOUT        15
+#define MENU_CPU          16
 
 
 int8_t settingsIdx = MENU_BRIGHTNESS;
@@ -148,9 +150,9 @@ static const char *settings[] =
   "Load EiBi",
   "USB Port",
   "Bluetooth",
-  "BLE Auto-Off",
   "Wi-Fi",
   "About",
+  "CPU Usage",
 };
 
 //
@@ -284,24 +286,11 @@ int getTotalUSBModes() { return(ITEM_COUNT(usbModeDesc)); }
 // Bluetooth Mode Menu
 //
 
-uint8_t bleModeIdx = BLE_OFF;
+uint8_t bleModeIdx = BLE_ADHOC;
 static const char *bleModeDesc[] =
 { "Off", "On" };
 
 int getTotalBleModes() { return(ITEM_COUNT(bleModeDesc)); }
-
-//
-// BLE Auto-Off Menu
-//
-
-uint8_t bleAutoOffIdx = 0;
-static const char *bleAutoOffDesc[] =
-{ "Never", "5 min", "15 min", "30 min", "1 hr" };
-
-static const uint32_t bleAutoOffMs[] =
-{ 0, 300000UL, 900000UL, 1800000UL, 3600000UL };
-
-uint32_t getBleAutoOffMs() { return bleAutoOffMs[bleAutoOffIdx]; }
 
 //
 // WiFi Mode Menu
@@ -534,8 +523,8 @@ void doSelectDigit(int16_t enc)
 
 void doVolume(int16_t enc)
 {
-  volume = clamp_range(volume, enc, 0, 63);
-  if(!muteOn(MUTE_MAIN)) rx.setVolume(volume);
+  volume = clamp_range(volume, enc, 0, 100);
+  if(!muteOn(MUTE_MAIN)) rx.setVolume((uint8_t)(volume * 63 / 100));
 }
 
 static void clickVolume(bool shortPress)
@@ -704,11 +693,6 @@ static void doBleMode(int16_t enc)
   uint8_t newBleModeIdx = wrap_range(bleModeIdx, enc, 0, LAST_ITEM(bleModeDesc));
   bleInit(newBleModeIdx);
   bleModeIdx = newBleModeIdx;
-}
-
-static void doBleAutoOff(int16_t enc)
-{
-  bleAutoOffIdx = wrap_range(bleAutoOffIdx, enc, 0, LAST_ITEM(bleAutoOffDesc));
 }
 
 static void doWiFiMode(int16_t enc)
@@ -964,6 +948,13 @@ static void clickMenu(int cmd, bool shortPress)
       currentCmd = CMD_SCAN;
       clickScan(true);
       break;
+
+    case MENU_WATERFALL:
+      // Launch the full-screen scrolling waterfall (blocking until exit)
+      currentCmd = CMD_WATERFALL;
+      waterfallRun();
+      currentCmd = CMD_NONE;
+      break;
   }
 }
 
@@ -993,13 +984,13 @@ static void clickSettings(int cmd, bool shortPress)
     case MENU_UTCOFFSET:  currentCmd = CMD_UTCOFFSET;  break;
     case MENU_USBMODE:    currentCmd = CMD_USBMODE;    break;
     case MENU_BLEMODE:     currentCmd = CMD_BLEMODE;     break;
-    case MENU_BLE_AUTOOFF: currentCmd = CMD_BLE_AUTOOFF; break;
     case MENU_WIFIMODE:    currentCmd = CMD_WIFIMODE;    break;
     case MENU_FM_REGION:
       // Only in FM mode
       if(currentMode==FM) currentCmd = CMD_FM_REGION;
       break;
     case MENU_ABOUT:      currentCmd = CMD_ABOUT;     break;
+    case MENU_CPU:        currentCmd = CMD_CPU;       break;
 
     case MENU_LOADEIBI:
       eibiLoadSchedule();
@@ -1036,13 +1027,13 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_SLEEPMODE:  doSleepMode(scrollDirection * enc);break;
     case CMD_USBMODE:    doUSBMode(scrollDirection * enc);break;
     case CMD_BLEMODE:     doBleMode(scrollDirection * enc);break;
-    case CMD_BLE_AUTOOFF: doBleAutoOff(scrollDirection * enc);break;
     case CMD_WIFIMODE:    doWiFiMode(scrollDirection * enc);break;
     case CMD_ZOOM:       doZoom(enc);break;
     case CMD_SCROLL:     doScrollDir(enc);break;
     case CMD_UTCOFFSET:  doUTCOffset(scrollDirection * enc);break;
     case CMD_SQUELCH:    doSquelch(enca);break;
     case CMD_ABOUT:        doAbout(enc);break;
+    case CMD_CPU:          cpuDisplayIdx = wrap_range(cpuDisplayIdx, scrollDirection * enc, 0, 1); break;
     case CMD_SCAN:         return doScanChannel(scrollDirection * enc);
     case CMD_CUSTOM_THEME: doCustomTheme(scrollDirection * enc);break;
     default:             return(false);
@@ -1280,6 +1271,42 @@ static void drawScan(int x, int y, int sx)
   spr.drawLine(40+x+(sx/2)+4, 66+y+5, 40+x+(sx/2)+17, 66+y+5, TH.menu_param);
 }
 
+// Waterfall sidebar icon: 5 rows of heat-gradient bars representing the
+// cold (blue) → hot (red) RSSI colour scale, with a time-arrow on the left.
+static void drawWaterfallMenu(int x, int y, int sx)
+{
+  drawCommon(menu[MENU_WATERFALL], x, y, sx);
+
+  // Heat-gradient bar colours (cold → hot)
+  static const uint16_t kHeat[5] = {
+    0x000F,  // dark blue  (0 % RSSI)
+    0x03FF,  // cyan        (25 %)
+    0x07E0,  // green       (50 %)
+    0xFFE0,  // yellow      (75 %)
+    0xF800,  // red         (100 %)
+  };
+
+  const int cx  = 40 + x + (sx / 2);
+  const int cy  = 66 + y;
+  const int iw  = 42;   // icon width
+  const int bh  = 6;    // height of each gradient band
+  const int ih  = bh * 5;
+
+  // Draw 5 horizontal heat bands (oldest=top / coldest, newest=bottom / hottest)
+  for (int b = 0; b < 5; b++) {
+    spr.fillRect(cx - iw / 2, cy - ih / 2 + b * bh, iw, bh, kHeat[b]);
+  }
+  // Border
+  spr.drawRect(cx - iw / 2 - 1, cy - ih / 2 - 1, iw + 2, ih + 2, TH.menu_param);
+
+  // Down-arrow on the left indicating time flows downward
+  int ax = cx - iw / 2 - 7;
+  spr.drawFastVLine(ax, cy - ih / 2, ih, TH.menu_param);
+  spr.fillTriangle(ax - 3, cy + ih / 2 - 1,
+                   ax + 3, cy + ih / 2 - 1,
+                   ax,     cy + ih / 2 + 4, TH.menu_param);
+}
+
 static void drawBand(int x, int y, int sx)
 {
   drawCommon(menu[MENU_BAND], x, y, sx, true);
@@ -1384,28 +1411,6 @@ static void drawBleMode(int x, int y, int sx)
 
     spr.setTextDatum(MC_DATUM);
     spr.drawString(bleModeDesc[abs((bleModeIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
-  }
-}
-
-static void drawBleAutoOff(int x, int y, int sx)
-{
-  drawCommon(settings[MENU_BLE_AUTOOFF], x, y, sx, true);
-
-  int count = ITEM_COUNT(bleAutoOffDesc);
-  for(int i=-2 ; i<3 ; i++)
-  {
-    if(i==0) {
-      drawZoomedMenu(bleAutoOffDesc[abs((bleAutoOffIdx+count+i)%count)]);
-      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
-    } else {
-      spr.setTextColor(TH.menu_item);
-    }
-
-    // Prevent repeats for short menus
-    if(count < 5 && ((bleAutoOffIdx+i) < 0 || (bleAutoOffIdx+i) >= count)) continue;
-
-    spr.setTextDatum(MC_DATUM);
-    spr.drawString(bleAutoOffDesc[abs((bleAutoOffIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
   }
 }
 
@@ -1796,6 +1801,27 @@ static void drawInfo(int x, int y, int sx)
   }
 }
 
+static void drawCpuDisplay(int x, int y, int sx)
+{
+  drawCommon(settings[MENU_CPU], x, y, sx);
+  drawZoomedMenu(settings[MENU_CPU]);
+
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(TH.menu_param);
+  spr.drawString(cpuDisplayIdx ? "On" : "Off", 40+x+(sx/2), 60+y, 4);
+
+  // Live bar preview (scaled to sidebar width)
+  if (cpuDisplayIdx) {
+    const int bw = sx - 4;
+    int f0 = bw * getCpuLoad(0) / 100;
+    int f1 = bw * getCpuLoad(1) / 100;
+    spr.fillRect(x+2, 88+y, bw, 4, TH.bg);
+    if (f0 > 0) spr.fillRect(x+2, 88+y, f0, 4, TH.smeter_bar);
+    spr.fillRect(x+2, 95+y, bw, 4, TH.bg);
+    if (f1 > 0) spr.fillRect(x+2, 95+y, f1, 4, TH.smeter_bar_plus);
+  }
+}
+
 //
 // Draw side bar (menu or information)
 //
@@ -1828,12 +1854,13 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_SLEEPMODE:  drawSleepMode(x, y, sx);  break;
     case CMD_USBMODE:    drawUSBMode(x, y, sx);    break;
     case CMD_BLEMODE:     drawBleMode(x, y, sx);     break;
-    case CMD_BLE_AUTOOFF: drawBleAutoOff(x, y, sx); break;
     case CMD_WIFIMODE:    drawWiFiMode(x, y, sx);   break;
-    case CMD_ZOOM:       drawZoom(x, y, sx);       break;
-    case CMD_SCROLL:     drawScrollDir(x, y, sx);  break;
+    case CMD_ZOOM:       drawZoom(x, y, sx);        break;
+    case CMD_SCROLL:     drawScrollDir(x, y, sx);   break;
     case CMD_UTCOFFSET:  drawUTCOffset(x, y, sx);  break;
     case CMD_SQUELCH:    drawSquelch(x, y, sx);    break;
-    default:             drawInfo(x, y, sx);       break;
+    case CMD_CPU:        drawCpuDisplay(x, y, sx);    break;
+    case CMD_WATERFALL:  drawWaterfallMenu(x, y, sx); break;
+    default:             drawInfo(x, y, sx);           break;
   }
 }

@@ -46,7 +46,8 @@
 #define CMD_WIFIMODE   0x2F00 // |
 #define CMD_ABOUT         0x3000 //-+
 #define CMD_CUSTOM_THEME  0x3100 // Full-screen color wheel picker
-#define CMD_BLE_AUTOOFF   0x3200 // BLE auto-off timeout selector
+#define CMD_CPU           0x3200 // CPU usage display toggle
+#define CMD_WATERFALL     0x3300 // Full-screen scrolling waterfall display
 
 // UI Layouts
 #define UI_DEFAULT  0
@@ -122,7 +123,6 @@ int getCurrentUTCOffset();
 int getTotalUTCOffsets();
 int getTotalFmRegions();
 int      getTotalBleModes();
-uint32_t getBleAutoOffMs();
 
 void doSoftMute(int16_t enc);
 void doAgc(int16_t enc);

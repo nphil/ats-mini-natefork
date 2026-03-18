@@ -6,6 +6,11 @@
 #include "Remote.h"
 #include "Storage.h"
 
+static void bleScanProgress(uint8_t pct)
+{
+  drawMessageProgress("Scanning...", pct);
+}
+
 
 static uint8_t char2nibble(char key)
 {
@@ -355,8 +360,22 @@ static bool jsonInt(const char *json, const char *key, long *val)
   return false;
 }
 
+// Sanitize a string for JSON embedding: replace " with ', \ with /, control chars with space
+static void jsonSanitize(char *dst, const char *src, size_t maxlen)
+{
+  if(!src || !maxlen) { if(dst && maxlen) dst[0] = '\0'; return; }
+  size_t i = 0;
+  for(; src[i] && i < maxlen - 1; i++) {
+    char c = src[i];
+    if(c == '"')       c = '\'';
+    else if(c == '\\') c = '/';
+    else if((uint8_t)c < 0x20 || (uint8_t)c == 0xFF) c = ' ';
+    dst[i] = c;
+  }
+  dst[i] = '\0';
+}
+
 // Send a compact JSON status packet.
-// All fields fit in one MTU (< 250 bytes) so the BLE write() fires one notify.
 void remoteJsonStatus(Stream *stream, uint8_t seq)
 {
   rx.getCurrentReceivedSignalQuality();
@@ -366,7 +385,7 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
   int16_t cal = (currentMode == USB) ? getCurrentBand()->usbCal :
                 (currentMode == LSB) ? getCurrentBand()->lsbCal : 0;
 
-  static char buf[320];
+  static char buf[600];
   int n = snprintf(buf, sizeof(buf),
     "{\"t\":\"s\","
     "\"f\":%u,\"bfo\":%d,\"cal\":%d,"
@@ -376,7 +395,7 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
     "\"agc\":%d,\"v\":%u,"
     "\"r\":%u,\"sn\":%u,"
     "\"bat\":%.2f,\"seq\":%u,"
-    "\"sch\":%u,\"sci\":%d}\r\n",
+    "\"sch\":%u,\"sci\":%d",
     currentFrequency, currentBFO, cal,
     currentMode, bandModeDesc[currentMode],
     (unsigned)bandIdx, getCurrentBand()->bandName,
@@ -386,12 +405,49 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
     bat, seq,
     scanChannels.count, scanChannelIdx);
 
+  // Append RDS fields when in FM mode
+  if(n > 0 && currentMode == FM)
+  {
+    const char *ps  = getRdsPsRaw();
+    const char *rt  = getRdsRtRaw();
+    const char *pty = getRdsPtyRaw();
+    // Strip 0xFF EiBi prefix from station name
+    if(ps && (uint8_t)ps[0] == 0xFF) ps++;
+    char ps_buf[16]  = "";
+    char rt_buf[80]  = "";
+    char pty_buf[32] = "";
+    jsonSanitize(ps_buf,  ps,  sizeof(ps_buf));
+    jsonSanitize(rt_buf,  rt,  sizeof(rt_buf));
+    jsonSanitize(pty_buf, pty, sizeof(pty_buf));
+    const char *ct = clockGet(); // RDS/NTP time ("HH:MM") or NULL
+    int added = snprintf(buf + n, sizeof(buf) - n,
+      ",\"ps\":\"%s\",\"rt\":\"%s\",\"pty\":\"%s\"%s%s%s",
+      ps_buf, rt_buf, pty_buf,
+      ct ? ",\"ct\":\"" : "", ct ? ct : "", ct ? "\"" : "");
+    if(added > 0) n += added;
+  }
+
+  // Append CPU load fields
+  if(n > 0) {
+    int added = snprintf(buf + n, sizeof(buf) - n,
+      ",\"cpu0\":%u,\"cpu1\":%u",
+      (unsigned)getCpuLoad(0), (unsigned)getCpuLoad(1));
+    if(added > 0) n += added;
+  }
+
+  // Close JSON object
+  if(n > 0 && n < (int)sizeof(buf) - 3) {
+    buf[n++] = '}';
+    buf[n++] = '\r';
+    buf[n++] = '\n';
+  }
+
   stream->write((uint8_t*)buf, n);
 }
 
 // Stream the last completed scan as a JSON object.
-// The RSSI and SNR arrays are built into a static 2 KB buffer then sent
-// in one write() call to minimise the number of BLE notifications.
+// Data is sent in small chunks (~100 bytes each) to stay within BLE MTU limits.
+#define SCAN_CHUNK 100
 static void remoteJsonScanData(Stream *stream)
 {
   if(!scanIsDone())
@@ -401,26 +457,50 @@ static void remoteJsonScanData(Stream *stream)
   }
 
   uint16_t n = scanGetCount();
-  static char buf[2048];
-  int pos = snprintf(buf, sizeof(buf),
+  static char buf[SCAN_CHUNK + 16];
+  int pos;
+
+  // Header
+  pos = snprintf(buf, sizeof(buf),
     "{\"t\":\"scan\",\"sf\":%u,\"step\":%u,\"n\":%u,\"r\":[",
     scanGetStartFreq(), scanGetStep(), n);
+  stream->write((uint8_t*)buf, pos);
 
-  for(uint16_t i = 0; i < n && pos < (int)sizeof(buf) - 16; i++)
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", i ? "," : "", scanGetRawRSSI(i));
-
-  if(pos < (int)sizeof(buf) - 12)
+  // RSSI array in chunks
+  for(uint16_t i = 0; i < n; )
   {
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"sn\":[");
-    for(uint16_t i = 0; i < n && pos < (int)sizeof(buf) - 8; i++)
-      pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", i ? "," : "", scanGetRawSNR(i));
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"ch\":[");
-    for(uint8_t i = 0; i < scanChannels.count && pos < (int)sizeof(buf) - 8; i++)
-      pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", i ? "," : "", scanChannels.freq[i]);
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "]}\r\n");
+    pos = 0;
+    while(i < n && pos < SCAN_CHUNK)
+    {
+      pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", (i > 0) ? "," : "", scanGetRawRSSI(i));
+      i++;
+    }
+    stream->write((uint8_t*)buf, pos);
+    delay(5);
   }
 
-  stream->write((uint8_t*)buf, pos);
+  // SNR array
+  stream->print("],\"sn\":[");
+  for(uint16_t i = 0; i < n; )
+  {
+    pos = 0;
+    while(i < n && pos < SCAN_CHUNK)
+    {
+      pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", (i > 0) ? "," : "", scanGetRawSNR(i));
+      i++;
+    }
+    stream->write((uint8_t*)buf, pos);
+    delay(5);
+  }
+
+  // Channel list and close
+  stream->print("],\"ch\":[");
+  for(uint8_t i = 0; i < scanChannels.count; i++)
+  {
+    pos = snprintf(buf, sizeof(buf), "%s%u", i ? "," : "", scanChannels.freq[i]);
+    stream->write((uint8_t*)buf, pos);
+  }
+  stream->print("]}\r\n");
 }
 
 //
@@ -503,11 +583,28 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
   // ---- Scan: run a new scan, then return data ------------------------
   else if(!strcmp(cmd, "scan"))
   {
+    long step = 10;
+    jsonInt(json, "step", &step);
+    if(step < 5)   step = 5;
+    if(step > 100) step = 100;
     stream->print("{\"t\":\"ack\",\"cmd\":\"scan\"}\r\n");
-    scanRun(currentFrequency, 10);
+    drawScreen();
+    drawMessageProgress("Scanning...", 0);
+    scanRun(currentFrequency, (uint16_t)step, stream, bleScanProgress);
     scanExtractChannels();
     prefsSaveScanChannels(bandIdx);
     remoteJsonScanData(stream);
+    remoteJsonStatus(stream, state->remoteSeqnum++);
+    return event | REMOTE_PREFS;
+  }
+
+  // ---- Seek: find next station in given direction --------------------
+  else if(!strcmp(cmd, "seek"))
+  {
+    long dir = 1;
+    jsonInt(json, "d", &dir);
+    stream->print("{\"t\":\"ack\",\"cmd\":\"seek\"}\r\n");
+    doSeek(dir > 0 ? 1 : -1);
     remoteJsonStatus(stream, state->remoteSeqnum++);
     return event | REMOTE_PREFS;
   }
@@ -516,6 +613,166 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
   else if(!strcmp(cmd, "scandata"))
   {
     remoteJsonScanData(stream);
+    return event;
+  }
+
+  // ---- Save scan result as a named preset to NVS -------------------
+  else if(!strcmp(cmd, "save_preset"))
+  {
+    char name[PRESET_NAME_LEN] = {0};
+    jsonStr(json, "name", name, sizeof(name));
+    if(!name[0]) strncpy(name, "Preset", sizeof(name));
+
+    if(!scanIsDone())
+    {
+      static const char e1[] = "{\"t\":\"err\",\"cmd\":\"save_preset\",\"msg\":\"No scan data to save\"}\r\n";
+      stream->write((const uint8_t*)e1, sizeof(e1)-1);
+      return event;
+    }
+    uint8_t idx = prefsGetPresetCount();
+    if(idx >= PRESET_MAX)
+    {
+      static char errbuf[64];
+      int n = snprintf(errbuf, sizeof(errbuf),
+        "{\"t\":\"err\",\"cmd\":\"save_preset\",\"msg\":\"Max %d presets reached\"}\r\n", PRESET_MAX);
+      stream->write((uint8_t*)errbuf, n);
+      return event;
+    }
+    if(!prefsSavePreset(name))
+    {
+      static const char e2[] = "{\"t\":\"err\",\"cmd\":\"save_preset\",\"msg\":\"Save failed\"}\r\n";
+      stream->write((const uint8_t*)e2, sizeof(e2)-1);
+      return event;
+    }
+    {
+      static char okbuf[96];
+      int n = snprintf(okbuf, sizeof(okbuf),
+        "{\"t\":\"preset_saved\",\"name\":\"%s\",\"idx\":%u,\"total\":%u}\r\n",
+        name, idx, idx + 1);
+      stream->write((uint8_t*)okbuf, n);
+    }
+    return event;
+  }
+
+  // ---- List all saved presets --------------------------------------
+  else if(!strcmp(cmd, "list_presets"))
+  {
+    uint8_t count = prefsGetPresetCount();
+    static char lbuf[32];
+    int ln = snprintf(lbuf, sizeof(lbuf), "{\"t\":\"presets\",\"list\":[");
+    stream->write((uint8_t*)lbuf, ln);
+    for(uint8_t i = 0; i < count; i++)
+    {
+      char pname[PRESET_NAME_LEN];
+      uint8_t pband;
+      ScanChannelList pch;
+      if(prefsGetPreset(i, pname, sizeof(pname), &pband, &pch))
+      {
+        static char buf[72];
+        int bn = snprintf(buf, sizeof(buf), "%s{\"idx\":%u,\"name\":\"%s\",\"band\":%u,\"ch\":%u}",
+                 i ? "," : "", i, pname, pband, pch.count);
+        stream->write((uint8_t*)buf, bn);
+      }
+    }
+    static const char lend[] = "]}\r\n";
+    stream->write((const uint8_t*)lend, sizeof(lend)-1);
+    return event;
+  }
+
+  // ---- Delete a preset by index ------------------------------------
+  else if(!strcmp(cmd, "delete_preset"))
+  {
+    if(!jsonInt(json, "idx", &val))
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"delete_preset\",\"msg\":\"Missing idx\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    uint8_t didx = (uint8_t)val;
+    if(!prefsDeletePreset(didx))
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"delete_preset\",\"msg\":\"Not found\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    {
+      static char okbuf[64];
+      int n = snprintf(okbuf, sizeof(okbuf),
+        "{\"t\":\"preset_deleted\",\"idx\":%u,\"total\":%u}\r\n",
+        didx, prefsGetPresetCount());
+      stream->write((uint8_t*)okbuf, n);
+    }
+    return event;
+  }
+
+  // ---- Rename a preset by index ------------------------------------
+  else if(!strcmp(cmd, "rename_preset"))
+  {
+    if(!jsonInt(json, "idx", &val))
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"rename_preset\",\"msg\":\"Missing idx\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    uint8_t ridx = (uint8_t)val;
+    char rname[PRESET_NAME_LEN] = {0};
+    jsonStr(json, "name", rname, sizeof(rname));
+    if(!rname[0])
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"rename_preset\",\"msg\":\"Missing name\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    if(!prefsRenamePreset(ridx, rname))
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"rename_preset\",\"msg\":\"Not found\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    {
+      static char okbuf[64];
+      int n = snprintf(okbuf, sizeof(okbuf),
+        "{\"t\":\"preset_renamed\",\"idx\":%u,\"name\":\"%s\"}\r\n", ridx, rname);
+      stream->write((uint8_t*)okbuf, n);
+    }
+    return event;
+  }
+
+  // ---- Load a preset's channel list into current view -------------
+  else if(!strcmp(cmd, "load_preset"))
+  {
+    if(!jsonInt(json, "idx", &val))
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"load_preset\",\"msg\":\"Missing idx\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    uint8_t pidx = (uint8_t)val;
+    char pname[PRESET_NAME_LEN];
+    uint8_t pband;
+    ScanChannelList pch;
+    if(!prefsGetPreset(pidx, pname, sizeof(pname), &pband, &pch))
+    {
+      static const char e[] = "{\"t\":\"err\",\"cmd\":\"load_preset\",\"msg\":\"Not found\"}\r\n";
+      stream->write((const uint8_t*)e, sizeof(e)-1);
+      return event;
+    }
+    // Send header
+    {
+      static char hbuf[64];
+      int n = snprintf(hbuf, sizeof(hbuf),
+        "{\"t\":\"preset_loaded\",\"idx\":%u,\"name\":\"%s\",\"ch\":[", pidx, pname);
+      stream->write((uint8_t*)hbuf, n);
+    }
+    // Channel frequencies
+    for(uint8_t i = 0; i < pch.count; i++)
+    {
+      static char fbuf[12];
+      int n = snprintf(fbuf, sizeof(fbuf), "%s%u", i ? "," : "", pch.freq[i]);
+      stream->write((uint8_t*)fbuf, n);
+    }
+    static const char pend[] = "]}\r\n";
+    stream->write((const uint8_t*)pend, sizeof(pend)-1);
     return event;
   }
 

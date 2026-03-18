@@ -19,7 +19,7 @@
 #define MIN_ELAPSED_TIME         5  // 300
 #define MIN_ELAPSED_RSSI_TIME  200  // RSSI check uses IN_ELAPSED_RSSI_TIME * 6 = 1.2s
 #define ELAPSED_COMMAND      10000  // time to turn off the last command controlled by encoder. Time to goes back to the VFO control // G8PTN: Increased time and corrected comment
-#define DEFAULT_VOLUME          35  // change it for your favorite sound volume
+#define DEFAULT_VOLUME          55  // change it for your favorite sound volume
 #define DEFAULT_SLEEP            0  // Default sleep interval, range = 0 (off) to 255 in steps of 5
 #define RDS_CHECK_TIME         250  // Increased from 90
 #define SEEK_TIMEOUT        600000  // Max seek timeout (ms)
@@ -50,7 +50,7 @@ long lastScheduleCheck = millis();
 long elapsedCommand = millis();
 
 // BLE auto-off: tracks when we last had an active BLE connection.
-// Reset while connected; fires after getBleAutoOffMs() ms of no connection.
+// Reset while connected; fires after BLE_AUTO_OFF_MS ms of no connection.
 static uint32_t bleAutoOffTimer = 0;
 
 volatile int16_t encoderCount = 0;
@@ -257,12 +257,15 @@ void setup()
   // SI4732 STARTUP!
   selectBand(bandIdx, false);
   delay(50);
-  rx.setVolume(volume);
+  rx.setVolume((uint8_t)(volume * 63 / 100));
   rx.setMaxSeekTime(SEEK_TIMEOUT);
+
+  // Show boot splash
+  ledcWrite(PIN_LCD_BL, currentBrt);
+  drawSplash();
 
   // Draw display for the first time
   drawScreen();
-  ledcWrite(PIN_LCD_BL, currentBrt);
 
   // Interrupt actions for Rotary encoder
   // Note: Moved to end of setup to avoid inital interrupt actions
@@ -275,6 +278,9 @@ void setup()
 
   // Start Bluetooth LE, if necessary
   bleInit(bleModeIdx);
+
+  // Start low-priority idle-counter tasks for CPU load estimation
+  cpuInitTasks();
 }
 
 
@@ -947,8 +953,9 @@ void loop()
     elapsedSleep = elapsedCommand = currentTime = millis();
   }
 
-  // BLE auto-off: while a client is connected, keep the timer fresh.
-  // When the connection drops, start counting; shut down after the timeout.
+  // BLE auto-off: 5 minutes of no connection shuts it down.
+  // User can re-enable from Bluetooth menu.
+  #define BLE_AUTO_OFF_MS 300000UL
   if(bleModeIdx == BLE_ADHOC)
   {
     if(getBleStatus() > 0)
@@ -956,12 +963,12 @@ void loop()
       // Client connected — reset the idle timer
       bleAutoOffTimer = currentTime;
     }
-    else if(getBleAutoOffMs() > 0)
+    else
     {
       // No client connected; initialise the timer on the first check
       if(bleAutoOffTimer == 0) bleAutoOffTimer = currentTime;
 
-      if((currentTime - bleAutoOffTimer) >= getBleAutoOffMs())
+      if((currentTime - bleAutoOffTimer) >= BLE_AUTO_OFF_MS)
       {
         bleStop();
         bleModeIdx = BLE_OFF;
@@ -1013,6 +1020,9 @@ void loop()
 
   // Run clock
   needRedraw |= clockTickTime();
+
+  // Update CPU load once per second; trigger redraw if display is on
+  if (cpuDisplayIdx) needRedraw |= cpuUpdateLoad();
 
   // Periodically refresh the main screen
   // This covers the case where there is nothing else triggering a refresh

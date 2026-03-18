@@ -173,7 +173,6 @@ extern int8_t SsbSoftMuteIdx;
 extern uint8_t rdsModeIdx;
 extern uint8_t usbModeIdx;
 extern uint8_t bleModeIdx;
-extern uint8_t bleAutoOffIdx;
 extern uint8_t wifiModeIdx;
 extern uint8_t FmRegionIdx;
 
@@ -182,6 +181,12 @@ extern int8_t agcNdx;
 extern int8_t softMuteMaxAttIdx;
 extern uint8_t disableAgc;
 
+// CPU.cpp
+extern uint8_t cpuDisplayIdx;
+void cpuInitTasks();
+bool cpuUpdateLoad();
+uint8_t getCpuLoad(int core);
+
 extern const int CALMax;
 
 static inline bool isSSB() { return(currentMode>FM && currentMode<AM); }
@@ -189,7 +194,7 @@ static inline bool isSSB() { return(currentMode>FM && currentMode<AM); }
 void useBand(const Band *band);
 bool updateBFO(int newBFO, bool wrap = true);
 bool updateFrequency(int newFreq, bool wrap = true);
-bool doSeek(int16_t enc);
+bool doSeek(int16_t enc, int16_t enca = 0);
 bool clickFreq(bool shortPress);
 uint8_t doAbout(int16_t enc);
 bool checkStopSeeking();
@@ -199,7 +204,9 @@ float batteryMonitor();
 bool drawBattery(int x, int y);
 
 // Scan.c
-void     scanRun(uint16_t centerFreq, uint16_t step);
+typedef void (*ScanProgressFn)(uint8_t pct);
+void     scanRun(uint16_t centerFreq, uint16_t step, Stream* stream = nullptr, ScanProgressFn onProgress = nullptr);
+void     waterfallRun();
 void     scanExtractChannels();
 float    scanGetRSSI(uint16_t freq);
 float    scanGetSNR(uint16_t freq);
@@ -216,6 +223,9 @@ const char *getRadioText();
 const char *getProgramInfo();
 const char *getRdsTime();
 uint16_t getRdsPiCode();
+const char *getRdsPsRaw();   // PS regardless of RDS display mode setting
+const char *getRdsRtRaw();   // RT regardless of RDS display mode setting
+const char *getRdsPtyRaw();  // PTY regardless of RDS display mode setting
 void clearStationInfo();
 bool checkRds();
 bool identifyFrequency(uint16_t freq, bool periodic = false);

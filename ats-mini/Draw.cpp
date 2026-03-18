@@ -10,6 +10,27 @@
 //
 // Draw preferences write indicator
 //
+// Draw two horizontal CPU-load bars (core 0 and core 1).
+// Always shows a 2-px stub so bars are visible even at 0 % load.
+void drawCpuBars(int x, int y)
+{
+  const int barW  = 35;
+  const int barH  = 4;
+  const int gap   = 3;
+  const int stubs = 2;  // minimum filled pixels
+
+  int fill0 = stubs + (barW - stubs) * getCpuLoad(0) / 100;
+  int fill1 = stubs + (barW - stubs) * getCpuLoad(1) / 100;
+
+  // Core 0 bar (blue/cyan)
+  spr.fillRect(x, y,          barW, barH, TH.bg);
+  spr.fillRect(x, y,          fill0, barH, TH.smeter_bar);
+
+  // Core 1 bar (orange/red)
+  spr.fillRect(x, y+barH+gap, barW, barH, TH.bg);
+  spr.fillRect(x, y+barH+gap, fill1, barH, TH.smeter_bar_plus);
+}
+
 void drawSaveIndicator(int x, int y)
 {
   if(prefsAreWritten() || switchThemeEditor())
@@ -109,6 +130,36 @@ void drawMessage(const char *msg)
   if(sleepOn()) return;
 
   drawZoomedMenu(msg, true);
+  spr.pushSprite(0, 0);
+}
+
+//
+// Show overlay message with a progress bar (0-100)
+//
+void drawMessageProgress(const char *msg, uint8_t pct)
+{
+  if(sleepOn()) return;
+
+  const int x = RDS_OFFSET_X - 72;
+  const int y = RDS_OFFSET_Y - 3;
+  const int w = 154;
+  const int h = 42;
+
+  spr.fillSmoothRoundRect(x + 1, y + 1, w - 2, h - 2, 4, TH.menu_bg);
+  spr.setTextDatum(TC_DATUM);
+  spr.setTextColor(TH.menu_item);
+  spr.drawString(msg, RDS_OFFSET_X + 5, RDS_OFFSET_Y, 4);
+  spr.drawSmoothRoundRect(x, y, 4, 4, w, h, TH.menu_border, TH.menu_bg);
+
+  // Progress bar inside the box
+  const int bx = x + 8;
+  const int by = y + h - 11;
+  const int bw = w - 16;
+  const int bh = 5;
+  spr.fillRect(bx, by, bw, bh, TH.bg);
+  if(pct > 0) spr.fillRect(bx, by, (bw * pct) / 100, bh, TH.menu_border);
+  spr.drawRect(bx - 1, by - 1, bw + 2, bh + 2, TH.menu_border);
+
   spr.pushSprite(0, 0);
 }
 
