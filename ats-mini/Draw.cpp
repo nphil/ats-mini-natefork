@@ -401,7 +401,7 @@ void drawStationName(const char *name, int x, int y)
 {
   spr.setTextDatum(TC_DATUM);
   spr.setTextColor(TH.rds_text);
-  spr.drawString(name, x, y, 4);
+  spr.drawString(name, x, y, 2);
 }
 
 //
@@ -517,7 +517,7 @@ void drawScanGraphs(uint32_t freq)
 static void drawHoldProgress()
 {
   unsigned long holdMs = pb1.getPressedDuration();
-  if(!holdMs || pushAndRotate) return;
+  if(holdMs < SHORT_PRESS_INTERVAL || pushAndRotate) return;
 
   // --- Progress bar (2 px tall, flush under the top status bar at y=16) ---
   uint16_t barW = (uint16_t)min(320UL, holdMs * 320UL / HOLD_SLEEP_MS);
@@ -527,7 +527,7 @@ static void drawHoldProgress()
 
   // --- Toast label ---
   const char *toast = nullptr;
-  if(holdMs >= LONG_PRESS_INTERVAL)       // ≥ 2 s → about to trigger sleep
+  if(holdMs >= HOLD_SLEEP_MS - 200)       // ≥ 2.8 s → screen about to turn off
     toast = "Screen Off";
   else if(holdMs >= SHORT_PRESS_INTERVAL) // ≥ 0.5 s → will be Volume on release
     toast = "Volume";
@@ -536,10 +536,10 @@ static void drawHoldProgress()
   {
     int tw = spr.textWidth(toast, 2) + 14;  // padding on each side
     int tx = (320 - tw) / 2;
-    spr.fillRoundRect(tx, 20, tw, 15, 3, TH.menu_hl_bg);
+    spr.fillRoundRect(tx, 50, tw, 15, 3, TH.menu_hl_bg);
     spr.setTextDatum(MC_DATUM);
     spr.setTextColor(TH.menu_hl_text);
-    spr.drawString(toast, 160, 27, 2);
+    spr.drawString(toast, 160, 57, 2);
   }
 }
 
