@@ -214,5 +214,5 @@ jobs:
             --prerelease \
             --title "Latest Build" \
             --notes-file release-notes.md \
-            artifact/*.zip \
+            ./*.zip \
             ./*-flash.bin
