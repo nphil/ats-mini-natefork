@@ -53,3 +53,8 @@ ButtonTracker::State ButtonTracker::update(bool currentState, unsigned int debou
   }
   return result;
 }
+
+unsigned long ButtonTracker::getPressedDuration() const {
+  if (!lastStableState) return 0;
+  return millis() - pressStartTime;
+}

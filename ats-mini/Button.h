@@ -4,6 +4,7 @@
 #define DEBOUNCE_INTERVAL    50
 #define SHORT_PRESS_INTERVAL 500
 #define LONG_PRESS_INTERVAL  2000
+#define HOLD_SLEEP_MS        3000  // Hold duration (ms) to trigger sleep via hold gesture
 
 class ButtonTracker {
   public:
@@ -17,6 +18,7 @@ class ButtonTracker {
   ButtonTracker();
   void reset();
   State update(bool currentState, unsigned int debounceInterval = DEBOUNCE_INTERVAL);
+  unsigned long getPressedDuration() const;
 
   private:
     bool lastState; // Last raw input state

@@ -5,7 +5,10 @@
 #include "Menu.h"
 #include "Ble.h"
 #include "Draw.h"
+#include "Button.h"
 #include <math.h>
+
+extern ButtonTracker pb1;
 
 //
 // Draw preferences write indicator
@@ -508,6 +511,38 @@ void drawScanGraphs(uint32_t freq)
 //
 // Draw screen according to given command
 //
+// Draw the slim hold-progress bar and action toast while the encoder button is held.
+// The bar fills left→right across the full screen width over HOLD_SLEEP_MS (3 s).
+// Toast labels hint at the action that will fire on release / at the next threshold.
+static void drawHoldProgress()
+{
+  unsigned long holdMs = pb1.getPressedDuration();
+  if(!holdMs || pushAndRotate) return;
+
+  // --- Progress bar (2 px tall, flush under the top status bar at y=16) ---
+  uint16_t barW = (uint16_t)min(320UL, holdMs * 320UL / HOLD_SLEEP_MS);
+  spr.fillRect(0, 16, 320, 2, TH.smeter_bar_empty);   // track
+  if(barW > 0)
+    spr.fillRect(0, 16, barW, 2, TH.smeter_bar);       // filled portion
+
+  // --- Toast label ---
+  const char *toast = nullptr;
+  if(holdMs >= LONG_PRESS_INTERVAL)       // ≥ 2 s → about to trigger sleep
+    toast = "Screen Off";
+  else if(holdMs >= SHORT_PRESS_INTERVAL) // ≥ 0.5 s → will be Volume on release
+    toast = "Volume";
+
+  if(toast)
+  {
+    int tw = spr.textWidth(toast, 2) + 14;  // padding on each side
+    int tx = (320 - tw) / 2;
+    spr.fillRoundRect(tx, 20, tw, 15, 3, TH.menu_hl_bg);
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(TH.menu_hl_text);
+    spr.drawString(toast, 160, 27, 2);
+  }
+}
+
 void drawScreen(const char *statusLine1, const char *statusLine2)
 {
   if(sleepOn()) return;
@@ -531,6 +566,9 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
       drawLayoutDefault(statusLine1, statusLine2);
       break;
   }
+
+  // Overlay hold-progress bar and toast on top of the drawn layout
+  drawHoldProgress();
 
   spr.pushSprite(0, 0);
 }

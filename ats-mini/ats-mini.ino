@@ -861,9 +861,9 @@ void loop()
       // Reset timeouts
       elapsedSleep = elapsedCommand = currentTime;
     }
-    else if(pb1st.isLongPressed)
+    else if(pb1st.isLongPressed && pb1.getPressedDuration() >= HOLD_SLEEP_MS)
     {
-      // Encoder is being LONG PRESSED: TOGGLE DISPLAY
+      // Encoder held long enough (3 s): toggle display sleep
       sleepOn(!sleepOn());
       // CPU sleep can take long time, renew the timestamps
       elapsedSleep = elapsedCommand = currentTime = millis();
@@ -931,6 +931,11 @@ void loop()
     pushAndRotate = false;
     needRedraw = true;
   }
+
+  // While the button is physically held (and not in push-and-rotate), force a
+  // redraw every loop tick so the hold-progress bar animates smoothly.
+  if(pb1st.isPressed && !pushAndRotate && !sleepOn())
+    needRedraw = true;
 
   // Disable commands control
   if((currentTime - elapsedCommand) > ELAPSED_COMMAND)
