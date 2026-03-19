@@ -45,7 +45,11 @@
   #freqMainWrap { flex: 1; text-align: center; }
   #freqMain { font-family: 'Courier New', monospace; font-size: 52px; font-weight: bold; color: var(--lcd-text); letter-spacing: 4px; line-height: 1; text-shadow: 0 0 20px rgba(0,255,65,.4); cursor: pointer; user-select: none; }
   #freqMain:hover { text-shadow: 0 0 30px rgba(0,255,65,.7); }
-  #freqEditInput { background: transparent; border: none; border-bottom: 2px solid var(--accent); color: var(--lcd-text); font-family: 'Courier New', monospace; font-size: 40px; font-weight: bold; letter-spacing: 4px; width: 100%; text-align: center; outline: none; }
+  #quickTuneRow { display: flex; gap: 6px; margin-top: 8px; }
+  #quickTuneInput { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 6px 10px; font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+  #quickTuneInput:focus { outline: none; border-color: var(--accent); background: #111; }
+  #btnQuickTune { padding: 6px 14px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--accent); cursor: pointer; font-size: 13px; transition: background .12s; }
+  #btnQuickTune:hover { background: rgba(0,212,255,.12); }
   #freqUnitToggle { display: flex; justify-content: center; gap: 10px; margin-top: 5px; }
   .unit-opt { font-family: 'Courier New', monospace; font-size: 14px; color: #005a14; cursor: pointer; padding: 2px 8px; border-radius: 3px; transition: color .12s, background .12s; }
   .unit-opt.active { color: #00cc44; background: rgba(0,170,42,.15); }
@@ -186,13 +190,17 @@
       <button class="freq-seek-btn" id="btnSeekDown" title="Seek down">⏮</button>
       <button class="freq-step-btn" id="btnFreqDown">◀</button>
       <div id="freqMainWrap">
-        <div id="freqMain" title="Click to enter frequency">--- . ---</div>
+        <div id="freqMain">--- . ---</div>
         <div id="freqUnitToggle">
           <span class="unit-opt active" data-unit="auto">Auto</span>
           <span class="unit-opt" data-unit="mhz">MHz</span>
           <span class="unit-opt" data-unit="khz">kHz</span>
         </div>
         <div id="seekStatus"></div>
+        <div id="quickTuneRow">
+          <input id="quickTuneInput" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. 98.5 MHz  ·  7125 kHz  ·  14.225">
+          <button id="btnQuickTune" title="Tune to frequency">▶</button>
+        </div>
       </div>
       <button class="freq-step-btn" id="btnFreqUp">▶</button>
       <button class="freq-seek-btn" id="btnSeekUp" title="Seek up">⏭</button>
@@ -395,7 +403,7 @@ let device=null, rxChar=null, txChar=null;
 let rxBuf='';
 let lastStatus={};
 let scanData=null;
-let volPending=null, volTimer=null;
+let volPending=null;
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -899,43 +907,39 @@ document.querySelectorAll('.unit-opt').forEach(el => {
   });
 });
 
-// Click-to-edit frequency display
-document.getElementById('freqMain').addEventListener('click', function() {
-  if(this.querySelector('input')) return; // already editing
-  const f   = (lastStatus && lastStatus.f) || 0;
-  const m   = (lastStatus && lastStatus.m) || 0;
-  const isFM = (m === 0);
-  const { disp } = formatFreq(f, m);
-  const inp = document.createElement('input');
-  inp.id   = 'freqEditInput';
-  inp.type = 'number';
-  inp.value = disp;
-  inp.step  = (freqDisplayUnit === 'khz' || (freqDisplayUnit === 'auto' && !isFM)) ? '1' : (isFM ? '0.01' : '0.001');
-  this.textContent = '';
-  this.appendChild(inp);
-  inp.focus(); inp.select();
+// Quick-tune bar — parse free-form freq text and send to device
+function parseQuickTune(s) {
+  s = s.trim().replace(/,/g,'');
+  if(!s) return null;
+  const isFM = (lastStatus && lastStatus.m === 0);
+  const lower = s.toLowerCase();
+  const hasMHz = lower.includes('mhz') || lower.slice(-1) === 'm';
+  const hasKHz = lower.includes('khz') || lower.slice(-1) === 'k';
+  const v = parseFloat(s);
+  if(isNaN(v) || v <= 0) return null;
+  // Heuristic: if no explicit unit and value < 200, treat as MHz
+  const inMHz = hasMHz || (!hasKHz && v < 200);
+  if(isFM) return inMHz ? Math.round(v * 100) : Math.round(v / 10);
+  else      return inMHz ? Math.round(v * 1000) : Math.round(v);
+}
 
-  const commit = () => {
-    const v = parseFloat(inp.value);
-    if(!isNaN(v) && v > 0) {
-      const unit = freqDisplayUnit === 'auto' ? (isFM ? 'mhz' : 'khz') : freqDisplayUnit;
-      let val;
-      if(unit === 'mhz') {
-        val = Math.round(v * (isFM ? 100 : 1000));
-      } else {
-        val = isFM ? Math.round(v / 10) : Math.round(v);
-      }
-      send({cmd:'freq', val});
-    }
-    inp.removeEventListener('blur', commit);
-    if(lastStatus) updateStatus(lastStatus);
-  };
-  inp.addEventListener('keydown', e => {
-    if(e.key === 'Enter')  { e.preventDefault(); commit(); }
-    if(e.key === 'Escape') { inp.removeEventListener('blur', commit); if(lastStatus) updateStatus(lastStatus); }
-  });
-  inp.addEventListener('blur', commit);
+function commitQuickTune() {
+  const inp = document.getElementById('quickTuneInput');
+  const val = parseQuickTune(inp.value);
+  if(val) {
+    send({cmd:'freq', val});
+    inp.value = '';
+    inp.blur();
+  } else {
+    inp.select();
+  }
+}
+
+document.getElementById('quickTuneInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter')  { e.preventDefault(); commitQuickTune(); }
+  if(e.key === 'Escape') { document.getElementById('quickTuneInput').value=''; document.getElementById('quickTuneInput').blur(); }
 });
+document.getElementById('btnQuickTune').addEventListener('click', commitQuickTune);
 
 // Delta controls (band/mode/step/bw/agc)
 document.querySelectorAll('[data-cmd]').forEach(btn => {
@@ -943,24 +947,20 @@ document.querySelectorAll('[data-cmd]').forEach(btn => {
     send({ cmd: btn.dataset.cmd, d: parseInt(btn.dataset.d) }));
 });
 
-// Volume (debounced)
+// Volume — update display while dragging, send to device only on release
 document.getElementById('volSlider').addEventListener('input', e => {
-  const v = parseInt(e.target.value);
-  document.getElementById('volVal').textContent = v;
-  volPending = v;
-  clearTimeout(volTimer);
-  // Send delta to reach target volume — simplified: just send absolute set
-  // We calculate the delta from last known volume
-  volTimer = setTimeout(async () => {
-    const cur = lastStatus.v ?? 35;
-    const delta = volPending - cur;
-    if(delta !== 0) {
-      // Send multiple increments if delta is large
-      for(let i=0; i<Math.abs(delta); i++)
-        await send({cmd:'vol', d: delta>0 ? 1 : -1});
-    }
-    volPending = null;
-  }, 300);
+  volPending = parseInt(e.target.value);
+  document.getElementById('volVal').textContent = volPending;
+});
+document.getElementById('volSlider').addEventListener('change', async e => {
+  const target = parseInt(e.target.value);
+  const cur = lastStatus.v ?? 35;
+  const delta = target - cur;
+  if(delta !== 0) {
+    for(let i = 0; i < Math.abs(delta); i++)
+      await send({cmd:'vol', d: delta > 0 ? 1 : -1});
+  }
+  volPending = null;
 });
 
 // Click & sleep
@@ -1102,9 +1102,14 @@ function hsvToRgb(h, s, v) {
 }
 
 function wfIsFM() { return lastStatus.m === 0; }
-// Convert internal freq unit → display string
+// Convert internal freq unit → display string (rationalized for ham radio)
 function wfFmtFreq(f) {
-  return wfIsFM() ? (f/100).toFixed(2)+' MHz' : f+' kHz';
+  if(wfIsFM()) {
+    // FM: internal unit = 10 kHz → display in MHz, 2 decimal places (10 kHz resolution)
+    return (f/100).toFixed(2)+' MHz';
+  }
+  // AM/SSB/CW: internal unit = 1 kHz → display as integer kHz (no sub-kHz on a scanner)
+  return Math.round(f)+' kHz';
 }
 // Convert internal freq → value for the number inputs
 function wfToInput(f) { return wfIsFM() ? (f/100) : f; }
