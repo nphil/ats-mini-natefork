@@ -601,15 +601,12 @@ static void doTheme(int16_t enc)
   themeIdx = wrap_range(themeIdx, enc, 0, getTotalThemes() - 1);
 }
 
-// Rotate the custom theme hue with the encoder; live-updates the theme slot
+// Rotate through the curated palette list with the encoder; live-updates the theme slot
 static void doCustomTheme(int16_t enc)
 {
   if(!enc) return;
-  int16_t h = (int16_t)customThemeHue + enc;
-  if(h < 0)   h += 360;
-  if(h >= 360) h -= 360;
-  customThemeHue = (uint16_t)h;
-  applyCustomTheme(customThemeHue);
+  customPaletteIdx = (uint8_t)wrap_range((int)customPaletteIdx, enc, 0, getCustomPaletteCount() - 1);
+  applyCustomTheme(customPaletteIdx);
 }
 
 // Click while the color wheel is open: confirm and close

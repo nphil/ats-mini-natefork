@@ -59,6 +59,6 @@ void drawAbout();
 void drawAboutHelp(uint8_t arrow);
 void drawSplash();
 
-void drawColorWheel(uint16_t hue);
+void drawPaletteBrowser(uint8_t idx);
 
 #endif /* DRAW_H */

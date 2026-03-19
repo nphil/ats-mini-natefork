@@ -525,7 +525,7 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
   // Color wheel picker is a special case
   if(currentCmd==CMD_CUSTOM_THEME)
   {
-    drawColorWheel(customThemeHue);
+    drawPaletteBrowser(customPaletteIdx);
     return;
   }
 
@@ -543,58 +543,72 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
 }
 
 //
-// Draw the full-screen color wheel picker for the Custom theme.
-// The donut is centered at (160, 95); outer_r=62, inner_r=38.
-// The current hue is highlighted with a white pointer dot.
-// The center circle previews the background and text colors.
+// Draw the curated palette browser for the Custom theme.
+// The sprite background has already been filled with TH.bg by drawScreen().
+// applyCustomTheme() is called on every encoder tick, so TH always reflects
+// the currently-previewed palette — no explicit colour lookups needed here.
 //
-void drawColorWheel(uint16_t hue)
+void drawPaletteBrowser(uint8_t idx)
 {
-  const int16_t cx = 160, cy = 95;
-  const int16_t outer_r = 62, inner_r = 38, center_r = 32;
+  const int16_t W = 320;
 
-  // Title
-  spr.setTextDatum(TC_DATUM);
-  spr.setTextColor(TH.text, TH.bg);
-  spr.drawString("Custom Theme", 160, 3, 2);
-
-  // Hint at the bottom
+  // ---- Title ---------------------------------------------------------------
   spr.setTextDatum(TC_DATUM);
   spr.setTextColor(TH.text_muted, TH.bg);
-  spr.drawString("Rotate: color  Click: apply", 160, 155, 1);
+  spr.drawString("Custom Theme", W/2, 3, 2);
 
-  // Draw the color-wheel donut pixel by pixel
-  for(int16_t dy = -outer_r; dy <= outer_r; dy++)
-  {
-    for(int16_t dx = -outer_r; dx <= outer_r; dx++)
-    {
-      int32_t d2 = (int32_t)dx*dx + (int32_t)dy*dy;
-      if(d2 < (int32_t)inner_r*inner_r || d2 > (int32_t)outer_r*outer_r) continue;
-      float angle = atan2f((float)dy, (float)dx) * 57.2957795f + 180.0f;
-      spr.drawPixel(cx + dx, cy + dy, hsvToRgb565(angle, 1.0f, 1.0f));
-    }
-  }
+  // ---- Palette name (largest element — shows the current pick clearly) -----
+  spr.setTextColor(TH.freq_text, TH.bg);
+  spr.drawString(getCustomPaletteName(idx), W/2, 24, 4);
 
-  // Draw center preview circle
-  uint16_t bgColor  = hsvToRgb565((float)hue, 0.70f, 0.15f);
-  uint16_t txtColor = contrastingTextColor(bgColor);
-  uint16_t mutColor = hsvToRgb565((float)hue, 0.25f, 0.55f);
-  spr.fillCircle(cx, cy, center_r, bgColor);
+  // ---- Accent rule ---------------------------------------------------------
+  spr.fillRect(20, 56, W-40, 3, TH.scale_pointer);
 
-  // Sample text to preview contrast
-  spr.setTextDatum(MC_DATUM);
-  spr.setTextColor(txtColor, bgColor);
-  spr.drawString("Aa", cx, cy - 8, 4);
-  spr.setTextColor(mutColor, bgColor);
-  spr.drawString("Bb", cx, cy + 14, 2);
+  // ---- S-meter sample bar --------------------------------------------------
+  spr.fillRect(20, 64, 200, 8, TH.smeter_bar_empty);
+  spr.fillRect(20, 64, 128, 8, TH.smeter_bar);
+  spr.fillRect(148, 64, 24,  8, TH.smeter_bar_plus);
+  spr.setTextDatum(ML_DATUM);
+  spr.setTextColor(TH.smeter_icon, TH.bg);
+  spr.drawString("S7+", 228, 68, 1);
 
-  // Pointer: white outer dot, hue-colored inner dot at selected angle
-  float angle_rad = ((float)hue - 180.0f) / 57.2957795f;
-  int16_t mid_r   = (outer_r + inner_r) / 2;  // 50
-  int16_t px = cx + (int16_t)(cosf(angle_rad) * (float)mid_r);
-  int16_t py = cy + (int16_t)(sinf(angle_rad) * (float)mid_r);
-  spr.fillCircle(px, py, 5, 0xFFFF);
-  spr.fillCircle(px, py, 3, hsvToRgb565((float)hue, 1.0f, 1.0f));
+  // ---- Band / frequency / mode row -----------------------------------------
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.band_text, TH.bg);
+  spr.drawString("FM", 20, 79, 2);
+
+  spr.setTextDatum(TR_DATUM);
+  spr.setTextColor(TH.freq_text, TH.bg);
+  spr.drawString("99.5", 218, 78, 4);
+
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.funit_text, TH.bg);
+  spr.drawString("MHz", 222, 89, 2);
+
+  spr.setTextColor(TH.mode_text, TH.bg);
+  spr.drawString("Stereo", 264, 79, 1);
+
+  // ---- Menu highlight sample -----------------------------------------------
+  spr.fillRect(20, 113, W-40, 18, TH.menu_hl_bg);
+  spr.setTextDatum(ML_DATUM);
+  spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+  spr.drawString("Theme select", 30, 122, 2);
+  spr.setTextDatum(MR_DATUM);
+  spr.setTextColor(TH.menu_param, TH.menu_hl_bg);
+  spr.drawString("Custom", W-30, 122, 2);
+
+  // ---- Muted text sample ---------------------------------------------------
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.text_muted, TH.bg);
+  spr.drawString("RDS: Sample text   Batt 3.8V", 20, 136, 1);
+
+  // ---- Navigation hint with index ------------------------------------------
+  char hint[48];
+  snprintf(hint, sizeof(hint), "%u / %u    Rotate: browse    Click: apply",
+           (unsigned)idx + 1, (unsigned)getCustomPaletteCount());
+  spr.setTextDatum(BC_DATUM);
+  spr.setTextColor(TH.text_muted, TH.bg);
+  spr.drawString(hint, W/2, 168, 1);
 
   spr.pushSprite(0, 0);
 }

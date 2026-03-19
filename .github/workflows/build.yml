@@ -236,7 +236,7 @@ jobs:
           if [ -n "$CHANGELOG_SECTION" ]; then
             echo "$CHANGELOG_SECTION" >> release-notes.md
           elif [ -n "$COMMITS" ]; then
-            printf '\n```\n%s\n```\n' "$COMMITS" >> release-notes.md
+            { echo ""; echo '```'; echo "$COMMITS"; echo '```'; } >> release-notes.md
           else
             echo "_No changelog available._" >> release-notes.md
           fi

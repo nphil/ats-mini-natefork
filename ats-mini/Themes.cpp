@@ -501,8 +501,53 @@ bool switchThemeEditor(int8_t state)
   return themeEditor;
 }
 
-// Current hue (0-359) for the Custom theme slot
-uint16_t customThemeHue = 200;
+// Current palette index for the Custom theme slot
+uint8_t customPaletteIdx = 0;
+
+// ---------------------------------------------------------------------------
+// Curated palette definitions: each entry supplies three seed colors in HSV.
+//   bg  — dark background
+//   txt — primary text / frequency display
+//   acc — accent / highlight
+// Muted text and the highlight-bg are derived automatically in applyCustomTheme.
+// ---------------------------------------------------------------------------
+typedef struct {
+  const char *name;
+  float bgH,  bgS,  bgV;   // background
+  float txtH, txtS, txtV;  // primary text / freq
+  float accH, accS, accV;  // accent
+} PaletteDef;
+
+static const PaletteDef kPalettes[] = {
+  // name          bgH   bgS   bgV    txtH  txtS  txtV    accH  accS  accV
+  { "Aurora",      265, 0.85, 0.12,   175, 0.90, 0.90,   120, 0.95, 0.85 },
+  { "Sunset",      345, 0.90, 0.12,    32, 1.00, 0.95,    10, 1.00, 1.00 },
+  { "Phosphor",    190, 0.90, 0.10,   120, 0.85, 0.90,    85, 1.00, 0.95 },
+  { "Deep Sea",    222, 0.90, 0.12,   200, 0.80, 1.00,    45, 1.00, 1.00 },
+  { "Forest",      130, 0.90, 0.10,    80, 0.85, 0.90,    55, 1.00, 1.00 },
+  { "Midnight",    240, 0.75, 0.13,   260, 0.30, 1.00,   290, 0.95, 1.00 },
+  { "Volcano",      20, 0.30, 0.08,    22, 1.00, 1.00,     8, 1.00, 0.95 },
+  { "Arctic",      205, 0.50, 0.15,   200, 0.15, 1.00,   195, 0.90, 1.00 },
+  { "Sakura",      300, 0.65, 0.13,   340, 0.40, 1.00,   350, 0.90, 1.00 },
+  { "Gold Rush",    30, 0.80, 0.10,    48, 0.95, 1.00,    28, 1.00, 0.95 },
+  { "Volt",          0, 0.00, 0.05,    68, 1.00, 1.00,   120, 1.00, 1.00 },
+  { "Twilight",    250, 0.70, 0.13,    45, 0.80, 0.95,   270, 0.90, 1.00 },
+  { "Copper",       20, 0.20, 0.09,    20, 0.90, 0.95,    38, 1.00, 1.00 },
+  { "Jade",        160, 0.60, 0.10,   155, 0.70, 0.90,    90, 1.00, 0.90 },
+  { "Crimson",     208, 0.65, 0.13,     5, 0.90, 0.95,    15, 0.80, 1.00 },
+  { "Glacier",     210, 0.25, 0.10,   200, 0.65, 1.00,     0, 0.00, 1.00 },
+};
+
+int getCustomPaletteCount()
+{
+  return (int)ITEM_COUNT(kPalettes);
+}
+
+const char *getCustomPaletteName(uint8_t idx)
+{
+  if(idx >= (uint8_t)ITEM_COUNT(kPalettes)) idx = 0;
+  return kPalettes[idx].name;
+}
 
 // Convert HSV (h=0..360, s=0..1, v=0..1) to RGB565
 uint16_t hsvToRgb565(float h, float s, float v)
@@ -544,19 +589,24 @@ uint16_t contrastingTextColor(uint16_t bg565)
   return (lum > 128u * 256u) ? 0x0000u : 0xFFFFu;
 }
 
-// Rebuild the Custom theme slot from a single hue (0-359)
-void applyCustomTheme(uint16_t hue)
+// Rebuild the Custom theme slot from a curated palette index
+void applyCustomTheme(uint8_t idx)
 {
-  customThemeHue = hue;
+  if(idx >= (uint8_t)ITEM_COUNT(kPalettes)) idx = 0;
+  customPaletteIdx = idx;
 
-  float fh = (float)hue;
-  uint16_t bg    = hsvToRgb565(fh, 0.70f, 0.15f);  // Dark saturated background
-  uint16_t txt   = contrastingTextColor(bg);          // Auto-contrasting text
-  uint16_t muted = hsvToRgb565(fh, 0.25f, 0.55f);   // Mid-tone muted text
-  uint16_t acc   = hsvToRgb565(fh, 1.00f, 0.85f);   // Bright accent
-  uint16_t hlbg  = hsvToRgb565(fh, 0.55f, 0.35f);   // Highlight / menu selection bg
-  uint16_t hltxt = contrastingTextColor(hlbg);        // Auto-contrasting text for hl bg
-  uint16_t brt   = hsvToRgb565(fh, 0.40f, 0.68f);   // Mid-bright for menu items
+  const PaletteDef &p = kPalettes[idx];
+
+  // Derive the five colour roles from the three palette seeds
+  uint16_t bg    = hsvToRgb565(p.bgH, p.bgS, p.bgV);
+  uint16_t txt   = hsvToRgb565(p.txtH, p.txtS, p.txtV);
+  uint16_t muted = hsvToRgb565(p.txtH, p.txtS * 0.50f, p.txtV * 0.58f);
+  uint16_t acc   = hsvToRgb565(p.accH, p.accS, p.accV);
+  // Highlight bg: same hue as bg but lifted to a mid-tone
+  float hlV      = fminf(p.bgV * 4.0f, 0.42f);
+  uint16_t hlbg  = hsvToRgb565(p.bgH, p.bgS * 0.75f, hlV);
+  uint16_t hltxt = contrastingTextColor(hlbg);
+  uint16_t brt   = acc;  // alias — used for mid-bright menu items
 
   // Custom is always the last entry in theme[]
   ColorTheme *t = &theme[getTotalThemes() - 1];

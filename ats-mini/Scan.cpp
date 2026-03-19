@@ -230,4 +230,3 @@ void scanRun(uint16_t centerFreq, uint16_t step, Stream* stream, ScanProgressFn 
   // Restore tuning delay
   rx.setMaxDelaySetFrequency(TUNE_DELAY_DEFAULT);
 }
-
