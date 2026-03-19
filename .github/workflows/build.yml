@@ -161,6 +161,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -180,24 +186,60 @@ jobs:
 
       - name: Write release notes
         run: |
-          cat > release-notes.md << 'EOF'
-          > **Auto-updated on every push to `main`.**
+          SLUG="${{ needs.build.outputs.slug }}"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M UTC')"
 
-          ## Flashing
+          # Extract the latest section from CHANGELOG.md (between first two ## headings)
+          CHANGELOG_SECTION="$(python3 -c "
+          import re, sys
+          try:
+              t = open('CHANGELOG.md').read()
+              m = re.search(r'(^## .+?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
+              print(m.group(0).strip() if m else '')
+          except Exception as e:
+              print('')
+          ")"
 
-          Download the `*-flash.bin` for your board variant and run:
+          # Recent commits since last tag (capped at 20)
+          LAST_TAG="$(git describe --tags --match 'v?.??' --abbrev=0 2>/dev/null || true)"
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS="$(git log --oneline "${LAST_TAG}..HEAD" --no-merges | head -20)"
+          else
+            COMMITS="$(git log --oneline -20 --no-merges)"
+          fi
 
-          ```
-          esptool.py --chip esp32s3 write_flash 0x0 <name>-flash.bin
-          ```
+          cat > release-notes.md << EOF
+          > **Auto-updated on every push to \`main\`.**
+          > Built from commit \`${SHORT_SHA}\` — ${BUILD_DATE}
 
-          | File suffix | Board PSRAM type |
-          |-------------|-----------------|
-          | `ospi`      | Octal SPI (most common) |
-          | `qspi`      | Quad SPI |
+          ## ⬇️ Quick Download (ospi — most ATS-Mini units)
 
-          The `.zip` files contain the individual partition images for OTA / partial updates.
+          Download \`ats-mini-${SLUG}-ospi-flash.bin\` and flash with:
+
+          \`\`\`
+          esptool.py --chip esp32s3 write_flash 0x0 ats-mini-${SLUG}-ospi-flash.bin
+          \`\`\`
+
+          ## Variants
+
+          | File | Board PSRAM |
+          |------|-------------|
+          | \`*-ospi-flash.bin\` | Octal SPI — most common ATS-Mini |
+          | \`*-qspi-flash.bin\` | Quad SPI |
+
+          The \`.zip\` files contain individual partition images for OTA / partial updates.
+
+          ## What's changed
           EOF
+
+          if [ -n "$CHANGELOG_SECTION" ]; then
+            echo "$CHANGELOG_SECTION" >> release-notes.md
+          elif [ -n "$COMMITS" ]; then
+            printf '\n```\n%s\n```\n' "$COMMITS" >> release-notes.md
+          else
+            echo "_No changelog available._" >> release-notes.md
+          fi
 
       - name: Update latest release
         env:
@@ -212,7 +254,7 @@ jobs:
           gh release create latest \
             --repo '${{ github.repository }}' \
             --prerelease \
-            --title "Latest Build" \
+            --title "Latest Build (${{ needs.build.outputs.slug }})" \
             --notes-file release-notes.md \
             ./*.zip \
             ./*-flash.bin
