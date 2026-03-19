@@ -84,7 +84,7 @@ const char *getRadioText()
 
 const char *getProgramInfo()
 {
-  return(getRDSMode() & RDS_RT? bufProgramInfo : "");
+  return(getRDSMode() & RDS_PT? bufProgramInfo : "");
 }
 
 uint16_t getRdsPiCode()

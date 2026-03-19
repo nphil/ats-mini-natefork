@@ -128,6 +128,7 @@ static const char *menu[] =
 #define MENU_WIFIMODE     14
 #define MENU_ABOUT        15
 #define MENU_CPU          16
+#define MENU_DST          17
 
 
 int8_t settingsIdx = MENU_BRIGHTNESS;
@@ -151,6 +152,7 @@ static const char *settings[] =
   "Wi-Fi",
   "About",
   "CPU Usage",
+  "DST",
 };
 
 //
@@ -187,12 +189,11 @@ int getTotalMemories() { return(ITEM_COUNT(memories)); }
 // RDS Menu
 //
 
-uint8_t rdsModeIdx = 1;  // default: EU (all RDS on)
+uint8_t rdsModeIdx = 1;  // default On
 static const RDSMode rdsMode[] =
 {
-  { 0,                                                                          "Off"   },
-  { RDS_PS | RDS_PI | RDS_RT | RDS_PT | RDS_CT,                               "EU"    },
-  { RDS_PS | RDS_PI | RDS_RT | RDS_PT | RDS_CT | RDS_RBDS,                    "US"    },
+  { 0,                                  "Off" },
+  { RDS_PS | RDS_PT | RDS_CT,           "On"  },
 };
 
 uint8_t getRDSMode() { return(rdsMode[rdsModeIdx].mode); }
@@ -213,49 +214,50 @@ static const char *sleepModeDesc[] =
 uint8_t utcOffsetIdx = 8;
 const UTCOffset utcOffsets[] =
 {
-  { -12 * 4,      "UTC-12 (IDLW)"      },
-  { -11 * 4,      "UTC-11 (SST/Samoa)" },
-  { -10 * 4,      "UTC-10 (HST/Hawaii)"},
-  { -9 * 4 - 2,   "UTC-9:30 (MART)"   },
-  { -9 * 4,       "UTC-9 (AKST/Anchorage)" },
-  { -8 * 4,       "UTC-8 (PST/Los Angeles)" },
-  { -7 * 4,       "UTC-7 (MST/Denver)" },
-  { -6 * 4,       "UTC-6 (CST/Chicago)" },
-  { -5 * 4,       "UTC-5 (EST/New York)" },
-  { -4 * 4,       "UTC-4 (AST/Halifax)" },
-  { -3 * 4 - 2,   "UTC-3:30 (NST/Newfoundland)" },
-  { -3 * 4,       "UTC-3 (BRT/Sao Paulo)" },
-  { -2 * 4 - 2,   "UTC-2:30"           },
-  { -2 * 4,       "UTC-2 (GST/S.Georgia)" },
-  { -1 * 4,       "UTC-1 (AZOT/Azores)" },
-  {  0 * 4,       "UTC+0 (GMT/London)" },
-  {  1 * 4,       "UTC+1 (CET/Paris)"  },
-  {  2 * 4,       "UTC+2 (EET/Athens)" },
-  {  3 * 4,       "UTC+3 (MSK/Moscow)" },
-  {  3 * 4 + 2,   "UTC+3:30 (IRST/Tehran)" },
-  {  4 * 4,       "UTC+4 (GST/Dubai)"  },
-  {  4 * 4 + 2,   "UTC+4:30 (AFT/Kabul)" },
-  {  5 * 4,       "UTC+5 (PKT/Karachi)" },
-  {  5 * 4 + 2,   "UTC+5:30 (IST/India)" },
-  {  5 * 4 + 3,   "UTC+5:45 (NPT/Nepal)" },
-  {  6 * 4,       "UTC+6 (BST/Dhaka)"  },
-  {  6 * 4 + 2,   "UTC+6:30 (MMT/Yangon)" },
-  {  7 * 4,       "UTC+7 (ICT/Bangkok)" },
-  {  8 * 4,       "UTC+8 (CST/Beijing)" },
-  {  8 * 4 + 3,   "UTC+8:45 (ACWST)"  },
-  {  9 * 4,       "UTC+9 (JST/Tokyo)"  },
-  {  9 * 4 + 2,   "UTC+9:30 (ACST/Adelaide)" },
-  { 10 * 4,       "UTC+10 (AEST/Sydney)" },
-  { 10 * 4 + 2,   "UTC+10:30 (LHST)"  },
-  { 11 * 4,       "UTC+11 (SBT/Honiara)" },
-  { 12 * 4,       "UTC+12 (NZST/Auckland)" },
-  { 12 * 4 + 3,   "UTC+12:45 (CHAST)" },
-  { 13 * 4,       "UTC+13 (TOT/Tonga)" },
-  { 13 * 4 + 3,   "UTC+13:45 (CHADT)" },
-  { 14 * 4,       "UTC+14 (LINT/Kiritimati)" },
+  { -12 * 4,      "IDLW"           },
+  { -11 * 4,      "SST/Samoa"      },
+  { -10 * 4,      "HST/Hawaii"     },
+  { -9 * 4 - 2,   "MART"           },
+  { -9 * 4,       "AKST/Anchorage" },
+  { -8 * 4,       "PST/Los Angeles"},
+  { -7 * 4,       "MST/Denver"     },
+  { -6 * 4,       "CST/Chicago"    },
+  { -5 * 4,       "EST/New York"   },
+  { -4 * 4,       "AST/Halifax"    },
+  { -3 * 4 - 2,   "NST/St.John's"  },
+  { -3 * 4,       "BRT/Sao Paulo"  },
+  { -2 * 4 - 2,   "UTC-2:30"       },
+  { -2 * 4,       "WGST/Greenland" },
+  { -1 * 4,       "AZOT/Azores"    },
+  {  0 * 4,       "GMT/London"     },
+  {  1 * 4,       "CET/Paris"      },
+  {  2 * 4,       "EET/Athens"     },
+  {  3 * 4,       "MSK/Moscow"     },
+  {  3 * 4 + 2,   "IRST/Tehran"    },
+  {  4 * 4,       "GST/Dubai"      },
+  {  4 * 4 + 2,   "AFT/Kabul"      },
+  {  5 * 4,       "PKT/Karachi"    },
+  {  5 * 4 + 2,   "IST/India"      },
+  {  5 * 4 + 3,   "NPT/Nepal"      },
+  {  6 * 4,       "BST/Dhaka"      },
+  {  6 * 4 + 2,   "MMT/Yangon"     },
+  {  7 * 4,       "ICT/Bangkok"    },
+  {  8 * 4,       "CST/Beijing"    },
+  {  8 * 4 + 3,   "ACWST"          },
+  {  9 * 4,       "JST/Tokyo"      },
+  {  9 * 4 + 2,   "ACST/Adelaide"  },
+  { 10 * 4,       "AEST/Sydney"    },
+  { 10 * 4 + 2,   "LHST"           },
+  { 11 * 4,       "SBT/Honiara"    },
+  { 12 * 4,       "NZST/Auckland"  },
+  { 12 * 4 + 3,   "CHAST"          },
+  { 13 * 4,       "TOT/Tonga"      },
+  { 13 * 4 + 3,   "CHADT"          },
+  { 14 * 4,       "LINT/Kiritimati"},
 };
 
-int getCurrentUTCOffset() { return(utcOffsets[utcOffsetIdx].offset); }
+bool dstOn = false;
+int getCurrentUTCOffset() { return(utcOffsets[utcOffsetIdx].offset + (dstOn ? 4 : 0)); }
 int getTotalUTCOffsets() { return(ITEM_COUNT(utcOffsets)); }
 
 //
@@ -692,6 +694,12 @@ static void doUTCOffset(int16_t enc)
   clockRefreshTime();
 }
 
+static void doDST(int16_t enc)
+{
+  if(enc) dstOn = !dstOn;
+  clockRefreshTime();
+}
+
 static void doZoom(int16_t enc)
 {
   zoomMenu = !zoomMenu;
@@ -959,6 +967,7 @@ static void clickSettings(int cmd, bool shortPress)
       break;
     case MENU_ABOUT:      currentCmd = CMD_ABOUT;     break;
     case MENU_CPU:        currentCmd = CMD_CPU;       break;
+    case MENU_DST:        currentCmd = CMD_DST;        break;
 
     case MENU_LOADEIBI:
       eibiLoadSchedule();
@@ -999,6 +1008,7 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_ZOOM:       doZoom(enc);break;
     case CMD_SCROLL:     doScrollDir(enc);break;
     case CMD_UTCOFFSET:  doUTCOffset(scrollDirection * enc);break;
+    case CMD_DST:        doDST(scrollDirection * enc); break;
     case CMD_SQUELCH:    doSquelch(enca);break;
     case CMD_ABOUT:        doAbout(enc);break;
     case CMD_CPU:          cpuDisplayIdx = wrap_range(cpuDisplayIdx, scrollDirection * enc, 0, 1); break;
@@ -1446,6 +1456,15 @@ static void drawUTCOffset(int x, int y, int sx)
   }
 }
 
+static void drawDST(int x, int y, int sx)
+{
+  drawCommon(settings[MENU_DST], x, y, sx, true);
+  drawZoomedMenu(dstOn ? "On" : "Off");
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+  spr.drawString(dstOn ? "On" : "Off", 40+x+(sx/2), 64+y, 4);
+}
+
 static void drawMemory(int x, int y, int sx)
 {
   char label_memory[16];
@@ -1785,6 +1804,7 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_ZOOM:       drawZoom(x, y, sx);        break;
     case CMD_SCROLL:     drawScrollDir(x, y, sx);   break;
     case CMD_UTCOFFSET:  drawUTCOffset(x, y, sx);  break;
+    case CMD_DST:        drawDST(x, y, sx);       break;
     case CMD_SQUELCH:    drawSquelch(x, y, sx);    break;
     case CMD_CPU:        drawCpuDisplay(x, y, sx);    break;
     default:             drawInfo(x, y, sx);           break;

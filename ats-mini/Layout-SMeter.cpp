@@ -199,17 +199,6 @@ void drawLayoutSmeter(const char *statusLine1, const char *statusLine2)
   else if(*getStationName())
     drawStationName(getStationName(), RDS_OFFSET_X, RDS_OFFSET_Y);
 
-  // Show PI code if available (small, top-right corner near mode box)
-  uint16_t pi = getRdsPiCode();
-  if(pi)
-  {
-    char piBuf[8];
-    sprintf(piBuf, "%04X", pi);
-    spr.setTextDatum(TR_DATUM);
-    spr.setTextColor(TH.text_muted);
-    spr.drawString(piBuf, 319, BAND_OFFSET_Y + 33, 1);
-  }
-
   // Draw band scale
   drawSmallScale(isSSB()? (currentFrequency + currentBFO/1000) : currentFrequency, 120);
 

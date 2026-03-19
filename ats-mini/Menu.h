@@ -47,6 +47,7 @@
 #define CMD_ABOUT         0x3000 //-+
 
 #define CMD_CPU           0x3200 // CPU usage display toggle
+#define CMD_DST           0x3600 // DST toggle
 
 // UI Layouts
 #define UI_DEFAULT  0
@@ -89,6 +90,7 @@ extern const UTCOffset utcOffsets[];
 extern const char *bandModeDesc[];
 extern const FMRegion fmRegions[];
 extern int bandIdx;
+extern bool dstOn;
 
 // These are menu commands
 static inline bool isMenuMode(uint16_t cmd)
