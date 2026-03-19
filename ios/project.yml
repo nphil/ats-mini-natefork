@@ -1,0 +1,36 @@
+name: ATSMini
+options:
+  bundleIdPrefix: com.atsmini
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  ATSMini:
+    type: application
+    platform: iOS
+    sources:
+      - path: ATSMini/Sources
+        type: group
+      - path: ATSMini/Resources
+        type: group
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atsmini.app
+        PRODUCT_NAME: "ATS-Mini Remote"
+        INFOPLIST_FILE: ATSMini/Info.plist
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
+        SWIFT_STRICT_CONCURRENCY: minimal

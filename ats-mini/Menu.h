@@ -32,7 +32,6 @@
 #define CMD_BRT        0x2100 // |
 #define CMD_CAL        0x2200 // |
 #define CMD_RDS        0x2300 // |
-#define CMD_UTCOFFSET  0x2400 // |
 #define CMD_FM_REGION  0x2500 // |
 #define CMD_THEME      0x2600 // |
 #define CMD_UI         0x2700 // |
@@ -47,7 +46,6 @@
 #define CMD_ABOUT         0x3000 //-+
 
 #define CMD_CPU           0x3200 // CPU usage display toggle
-#define CMD_DST           0x3600 // DST toggle
 
 // UI Layouts
 #define UI_DEFAULT  0
@@ -86,11 +84,9 @@ typedef struct
 
 extern Band bands[];
 extern Memory memories[];
-extern const UTCOffset utcOffsets[];
 extern const char *bandModeDesc[];
 extern const FMRegion fmRegions[];
 extern int bandIdx;
-extern bool dstOn;
 
 // These are menu commands
 static inline bool isMenuMode(uint16_t cmd)
@@ -121,7 +117,6 @@ const Bandwidth *getCurrentBandwidth();
 uint8_t getRDSMode();
 
 int getCurrentUTCOffset();
-int getTotalUTCOffsets();
 int getTotalFmRegions();
 int      getTotalBleModes();
 

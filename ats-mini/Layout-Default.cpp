@@ -47,11 +47,24 @@ void drawLayoutDefault(const char *statusLine1, const char *statusLine2)
     currentCmd == CMD_FREQ ? getFreqInputPos() + (pushAndRotate ? 0x80 : 0) : 100
   );
 
-  // Show station or channel name, if present
-  if(*getStationName() == 0xFF)
-    drawLongStationName(getStationName() + 1, MENU_OFFSET_X + 1 + 76 + MENU_DELTA_X + 2, RDS_OFFSET_Y);
-  else if(*getStationName())
-    drawStationName(getStationName(), RDS_OFFSET_X, RDS_OFFSET_Y);
+  // Show station name (PS) and/or PTY combined on one line
+  {
+    const char *ps  = getStationName();
+    const char *pty = getProgramInfo();
+    if(*ps == 0xFF)
+      drawLongStationName(ps + 1, MENU_OFFSET_X + 1 + 76 + MENU_DELTA_X + 2, RDS_OFFSET_Y);
+    else if(*ps || *pty)
+    {
+      char combined[32] = "";
+      if(*ps && *pty)
+        snprintf(combined, sizeof(combined), "%s | %s", ps, pty);
+      else if(*ps)
+        snprintf(combined, sizeof(combined), "%s", ps);
+      else
+        snprintf(combined, sizeof(combined), "%s", pty);
+      drawStationName(combined, RDS_OFFSET_X, RDS_OFFSET_Y);
+    }
+  }
 
   // Draw left-side menu/info bar
   // @@@ FIXME: Frequency display (above) intersects the side bar!
@@ -69,10 +82,7 @@ void drawLayoutDefault(const char *statusLine1, const char *statusLine2)
   }
   else if(!drawWiFiStatus(statusLine1, statusLine2, STATUS_OFFSET_X, STATUS_OFFSET_Y))
   {
-    // Show radio text if present, else show frequency scale
-    if(*getRadioText() || *getProgramInfo())
-      drawRadioText(STATUS_OFFSET_Y, STATUS_OFFSET_Y + 25);
-    else
-      drawScale(isSSB()? (currentFrequency + currentBFO/1000) : currentFrequency);
+    // Always show the frequency scale
+    drawScale(isSSB()? (currentFrequency + currentBFO/1000) : currentFrequency);
   }
 }

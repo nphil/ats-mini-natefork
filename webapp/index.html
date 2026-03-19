@@ -449,6 +449,10 @@ document.getElementById('btnConnect').addEventListener('click', async () => {
     log('Connected to ' + device.name, 'ok');
     // Subscribe to 500 ms status updates
     await send({ cmd:'sub', ms:500 });
+    // Sync device clock to browser's local time
+    const _d = new Date();
+    await send({ cmd:'settime', hh:_d.getHours(), mm:_d.getMinutes(), ss:_d.getSeconds() });
+    log(`Time sync → ${String(_d.getHours()).padStart(2,'0')}:${String(_d.getMinutes()).padStart(2,'0')}:${String(_d.getSeconds()).padStart(2,'0')}`, 'ok');
     // Load saved preset list
     await send({ cmd:'list_presets' });
   } catch(e) {

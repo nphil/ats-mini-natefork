@@ -51,7 +51,6 @@ static void webSetConfig(AsyncWebServerRequest *request);
 static const String webInputField(const String &name, const String &value, bool pass = false);
 static const String webStyleSheet();
 static const String webPage(const String &body);
-static const String webUtcOffsetSelector();
 static const String webThemeSelector();
 static const String webRadioPage();
 static const String webMemoryPage();
@@ -322,6 +321,18 @@ static void webInit()
   // This method saves configuration form contents
   server.on("/setconfig", HTTP_ANY, webSetConfig);
 
+  // Sync device clock to browser's local time
+  server.on("/settime", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if(request->hasParam("hh", true) && request->hasParam("mm", true))
+    {
+      uint8_t hh = request->getParam("hh", true)->value().toInt();
+      uint8_t mm = request->getParam("mm", true)->value().toInt();
+      uint8_t ss = request->hasParam("ss", true) ? request->getParam("ss", true)->value().toInt() : 0;
+      clockSet(hh, mm, ss);
+    }
+    request->send(200, "text/plain", "OK");
+  });
+
   // Start web server
   server.begin();
 }
@@ -360,15 +371,6 @@ void webSetConfig(AsyncWebServerRequest *request)
       prefs.putString(namePASS, pass);
       haveSSID |= ssid != "" && pass != "";
     }
-  }
-
-  // Save time zone
-  if(request->hasParam("utcoffset", true))
-  {
-    String utcOffset = request->getParam("utcoffset", true)->value();
-    utcOffsetIdx = utcOffset.toInt();
-    clockRefreshTime();
-    prefsSave |= SAVE_SETTINGS;
   }
 
   // Save theme
@@ -479,26 +481,6 @@ static const String webPage(const String &body)
 ;
 }
 
-static const String webUtcOffsetSelector()
-{
-  String result = "";
-
-  for(int i=0 ; i<getTotalUTCOffsets(); i++)
-  {
-    char text[64];
-
-    sprintf(text,
-      "<OPTION VALUE='%d'%s>%s</OPTION>",
-      i, utcOffsetIdx==i? " SELECTED":"",
-      utcOffsets[i].desc
-    );
-
-    result += text;
-  }
-
-  return(result);
-}
-
 static const String webThemeSelector()
 {
   String result = "";
@@ -538,6 +520,13 @@ static const String webRadioPage()
   }
 
   return webPage(
+"<SCRIPT>"
+"if(!sessionStorage.getItem('ts')){"
+  "var d=new Date();"
+  "fetch('/settime',{method:'POST',body:new URLSearchParams({hh:d.getHours(),mm:d.getMinutes(),ss:d.getSeconds()})});"
+  "sessionStorage.setItem('ts','1');"
+"}"
+"</SCRIPT>"
 "<H1>ATS-Mini Pocket Receiver</H1>"
 "<P ALIGN='CENTER'>"
   "<A HREF='/memory'>Memory</A>&nbsp;|&nbsp;<A HREF='/config'>Config</A>"
@@ -665,12 +654,6 @@ const String webConfigPage()
     "<TD>" + webInputField("password", loginPassword, true) + "</TD>"
   "</TR>"
   "<TR><TH COLSPAN=2 CLASS='HEADING'>Settings</TH></TR>"
-  "<TR>"
-    "<TD CLASS='LABEL'>Time Zone</TD>"
-    "<TD>"
-      "<SELECT NAME='utcoffset'>" + webUtcOffsetSelector() + "</SELECT>"
-    "</TD>"
-  "</TR>"
   "<TR>"
     "<TD CLASS='LABEL'>Theme</TD>"
     "<TD>"

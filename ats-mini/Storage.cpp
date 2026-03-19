@@ -205,11 +205,9 @@ void prefsSave(uint32_t items)
     prefs.putUShort("Sleep",      currentSleep);   // Sleep delay
     prefs.putUChar("Theme",       themeIdx);       // Color theme
     prefs.putUChar("RDSMode",     rdsModeIdx);     // RDS mode
-    prefs.putUChar("DST",         dstOn ? 1 : 0);       // DST toggle
     prefs.putUChar("SleepMode",   sleepModeIdx);   // Sleep mode
     prefs.putUChar("ZoomMenu",    zoomMenu);       // TRUE: Zoom menu
     prefs.putBool("ScrollDir", scrollDirection<0); // TRUE: Reverse scroll
-    prefs.putUChar("UTCOffset",   utcOffsetIdx);   // UTC Offset
     prefs.putUChar("Squelch",     currentSquelch); // Squelch
     prefs.putUChar("FmRegion",    FmRegionIdx);    // FM region
     prefs.putUChar("UILayout",    uiLayoutIdx);    // UI Layout
@@ -283,11 +281,9 @@ bool prefsLoad(uint32_t items)
     themeIdx       = prefs.getUChar("Theme", themeIdx);         // Color theme
     rdsModeIdx     = prefs.getUChar("RDSMode", rdsModeIdx);     // RDS mode
     if(rdsModeIdx > 1) rdsModeIdx = 1;  // clamp to new 2-option range
-    dstOn          = prefs.getUChar("DST", 0) != 0;     // DST toggle
     sleepModeIdx   = prefs.getUChar("SleepMode", sleepModeIdx); // Sleep mode
     zoomMenu       = prefs.getUChar("ZoomMenu", zoomMenu);      // TRUE: Zoom menu
     scrollDirection = prefs.getBool("ScrollDir", scrollDirection<0)? -1:1; // TRUE: Reverse scroll
-    utcOffsetIdx   = prefs.getUChar("UTCOffset", utcOffsetIdx); // UTC Offset
     currentSquelch = prefs.getUChar("Squelch", currentSquelch); // Squelch
     FmRegionIdx    = prefs.getUChar("FmRegion", FmRegionIdx);   // FM region
     uiLayoutIdx    = prefs.getUChar("UILayout", uiLayoutIdx);   // UI Layout

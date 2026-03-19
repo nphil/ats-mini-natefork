@@ -1,0 +1,415 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		15947EA83563C12A6E95B52B /* RDSCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B1FA951A85C0AC595C4ED89 /* RDSCard.swift */; };
+		17DF8203977374FAC56221B3 /* FrequencyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36221E1FEE545E891145F40 /* FrequencyCard.swift */; };
+		3752BE465D511BFB39FF99B0 /* RadioState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E103C68C1C750E569F35D46C /* RadioState.swift */; };
+		3C127CD89AF29326DA054350 /* GlassCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A056F12EE4517A2F5A2CBA /* GlassCard.swift */; };
+		3FF597F43A6EA0C1C0847FEF /* LogCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD209EE3A4DEA1D343F075F /* LogCard.swift */; };
+		4AC027B5C5B8B7F629F47DB6 /* SignalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCF5B811D0C155F14DC39179 /* SignalCard.swift */; };
+		4EBB58360F97F9275AE3D55E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 056FD35EEE526537A0C02B75 /* Assets.xcassets */; };
+		55CC8261B1C2F5FB99A65E52 /* BLEManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B9B57FBE57FA563DBB9C02 /* BLEManager.swift */; };
+		6F630F533A9C088C81F25764 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42145CD30A33B6D2C4D9C06B /* ContentView.swift */; };
+		872688F0E3C748D4DB27381F /* ControlsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81662EE9A7681B646DAE8AE4 /* ControlsCard.swift */; };
+		90A35709D125B30E08339FA9 /* WaterfallCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F3855FAF80707FB9BE16B04 /* WaterfallCard.swift */; };
+		9D90B2C3F17501ADCE360634 /* ConnectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E42FBDF09FEB9CC4DA4CD2 /* ConnectionCard.swift */; };
+		ABB8071CCB350424E394CC1F /* PresetsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3A9875272AF5781D4AFCCD /* PresetsCard.swift */; };
+		DED26BD793243D104999C13F /* ATSMiniApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E026F0F86419755973DFC3A3 /* ATSMiniApp.swift */; };
+		E04EAC330390F23938CEF346 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53568265C720350E2522C006 /* Theme.swift */; };
+		F4AC471F75A837FA0A504560 /* SpectrumCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD28D278B2A4E1ECCA1666F /* SpectrumCard.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		056FD35EEE526537A0C02B75 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0B1FA951A85C0AC595C4ED89 /* RDSCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDSCard.swift; sourceTree = "<group>"; };
+		3D3A9875272AF5781D4AFCCD /* PresetsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetsCard.swift; sourceTree = "<group>"; };
+		42145CD30A33B6D2C4D9C06B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		53568265C720350E2522C006 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		5F3855FAF80707FB9BE16B04 /* WaterfallCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterfallCard.swift; sourceTree = "<group>"; };
+		67E42FBDF09FEB9CC4DA4CD2 /* ConnectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionCard.swift; sourceTree = "<group>"; };
+		81662EE9A7681B646DAE8AE4 /* ControlsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlsCard.swift; sourceTree = "<group>"; };
+		9DD28D278B2A4E1ECCA1666F /* SpectrumCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrumCard.swift; sourceTree = "<group>"; };
+		A36221E1FEE545E891145F40 /* FrequencyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyCard.swift; sourceTree = "<group>"; };
+		ABD209EE3A4DEA1D343F075F /* LogCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogCard.swift; sourceTree = "<group>"; };
+		B0B9B57FBE57FA563DBB9C02 /* BLEManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEManager.swift; sourceTree = "<group>"; };
+		B5C2C77D80C6E137746106E1 /* ATSMini.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ATSMini.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BCF5B811D0C155F14DC39179 /* SignalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalCard.swift; sourceTree = "<group>"; };
+		D2A056F12EE4517A2F5A2CBA /* GlassCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassCard.swift; sourceTree = "<group>"; };
+		E026F0F86419755973DFC3A3 /* ATSMiniApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ATSMiniApp.swift; sourceTree = "<group>"; };
+		E103C68C1C750E569F35D46C /* RadioState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioState.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		520ED5D8CB266A392D9337B7 = {
+			isa = PBXGroup;
+			children = (
+				A1B6983D4F7C98813BC3CCF9 /* Resources */,
+				B36C3CD75B4084475A1129BD /* Sources */,
+				5C5DF26967CD7A3FC8276252 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5C5DF26967CD7A3FC8276252 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B5C2C77D80C6E137746106E1 /* ATSMini.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		630E26B35763B4D164D229E0 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				67E42FBDF09FEB9CC4DA4CD2 /* ConnectionCard.swift */,
+				42145CD30A33B6D2C4D9C06B /* ContentView.swift */,
+				81662EE9A7681B646DAE8AE4 /* ControlsCard.swift */,
+				A36221E1FEE545E891145F40 /* FrequencyCard.swift */,
+				ABD209EE3A4DEA1D343F075F /* LogCard.swift */,
+				3D3A9875272AF5781D4AFCCD /* PresetsCard.swift */,
+				0B1FA951A85C0AC595C4ED89 /* RDSCard.swift */,
+				BCF5B811D0C155F14DC39179 /* SignalCard.swift */,
+				9DD28D278B2A4E1ECCA1666F /* SpectrumCard.swift */,
+				5F3855FAF80707FB9BE16B04 /* WaterfallCard.swift */,
+				E868D10FD8A0CE86B90D97A4 /* Components */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		9325BC6BBEF2CEB2103A8578 /* BLE */ = {
+			isa = PBXGroup;
+			children = (
+				B0B9B57FBE57FA563DBB9C02 /* BLEManager.swift */,
+			);
+			path = BLE;
+			sourceTree = "<group>";
+		};
+		9A76EA300DA39F80783C81D0 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				E103C68C1C750E569F35D46C /* RadioState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A1B6983D4F7C98813BC3CCF9 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				056FD35EEE526537A0C02B75 /* Assets.xcassets */,
+			);
+			name = Resources;
+			path = ATSMini/Resources;
+			sourceTree = "<group>";
+		};
+		B36C3CD75B4084475A1129BD /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				E026F0F86419755973DFC3A3 /* ATSMiniApp.swift */,
+				9325BC6BBEF2CEB2103A8578 /* BLE */,
+				9A76EA300DA39F80783C81D0 /* Models */,
+				630E26B35763B4D164D229E0 /* Views */,
+			);
+			name = Sources;
+			path = ATSMini/Sources;
+			sourceTree = "<group>";
+		};
+		E868D10FD8A0CE86B90D97A4 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				D2A056F12EE4517A2F5A2CBA /* GlassCard.swift */,
+				53568265C720350E2522C006 /* Theme.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1241E6DD06BFA48046B7B941 /* ATSMini */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD657D51D225AFC489E2CD44 /* Build configuration list for PBXNativeTarget "ATSMini" */;
+			buildPhases = (
+				EA12533D015D1EF875E473FF /* Sources */,
+				80B3390D187F3841AB9CAF07 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ATSMini;
+			packageProductDependencies = (
+			);
+			productName = ATSMini;
+			productReference = B5C2C77D80C6E137746106E1 /* ATSMini.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		658A67B3B524D051F8CD36AC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					1241E6DD06BFA48046B7B941 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 816D9723595BF6FBD3FB08CC /* Build configuration list for PBXProject "ATSMini" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 520ED5D8CB266A392D9337B7;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5C5DF26967CD7A3FC8276252 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1241E6DD06BFA48046B7B941 /* ATSMini */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		80B3390D187F3841AB9CAF07 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4EBB58360F97F9275AE3D55E /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EA12533D015D1EF875E473FF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DED26BD793243D104999C13F /* ATSMiniApp.swift in Sources */,
+				55CC8261B1C2F5FB99A65E52 /* BLEManager.swift in Sources */,
+				9D90B2C3F17501ADCE360634 /* ConnectionCard.swift in Sources */,
+				6F630F533A9C088C81F25764 /* ContentView.swift in Sources */,
+				872688F0E3C748D4DB27381F /* ControlsCard.swift in Sources */,
+				17DF8203977374FAC56221B3 /* FrequencyCard.swift in Sources */,
+				3C127CD89AF29326DA054350 /* GlassCard.swift in Sources */,
+				3FF597F43A6EA0C1C0847FEF /* LogCard.swift in Sources */,
+				ABB8071CCB350424E394CC1F /* PresetsCard.swift in Sources */,
+				15947EA83563C12A6E95B52B /* RDSCard.swift in Sources */,
+				3752BE465D511BFB39FF99B0 /* RadioState.swift in Sources */,
+				4AC027B5C5B8B7F629F47DB6 /* SignalCard.swift in Sources */,
+				F4AC471F75A837FA0A504560 /* SpectrumCard.swift in Sources */,
+				E04EAC330390F23938CEF346 /* Theme.swift in Sources */,
+				90A35709D125B30E08339FA9 /* WaterfallCard.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		42CE620EB2F8DFCF9E9FC0C9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C2D6D1803A62408DEB775CBD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		CB213364D0A0E3A4E5417AC6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = ATSMini/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.atsmini.app;
+				PRODUCT_NAME = "ATS-Mini Remote";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		EE7F33CA17DA949D57BB2F88 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = ATSMini/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.atsmini.app;
+				PRODUCT_NAME = "ATS-Mini Remote";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		816D9723595BF6FBD3FB08CC /* Build configuration list for PBXProject "ATSMini" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C2D6D1803A62408DEB775CBD /* Debug */,
+				42CE620EB2F8DFCF9E9FC0C9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CD657D51D225AFC489E2CD44 /* Build configuration list for PBXNativeTarget "ATSMini" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB213364D0A0E3A4E5417AC6 /* Debug */,
+				EE7F33CA17DA949D57BB2F88 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 658A67B3B524D051F8CD36AC /* Project object */;
+}

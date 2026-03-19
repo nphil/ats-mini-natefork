@@ -114,21 +114,19 @@ static const char *menu[] =
 #define MENU_BRIGHTNESS   0
 #define MENU_CALIBRATION  1
 #define MENU_RDS          2
-#define MENU_UTCOFFSET    3
-#define MENU_FM_REGION    4
-#define MENU_THEME        5
-#define MENU_UI           6
-#define MENU_ZOOM         7
-#define MENU_SCROLL       8
-#define MENU_SLEEP        9
-#define MENU_SLEEPMODE    10
-#define MENU_LOADEIBI     11
-#define MENU_USBMODE      12
-#define MENU_BLEMODE      13
-#define MENU_WIFIMODE     14
-#define MENU_ABOUT        15
-#define MENU_CPU          16
-#define MENU_DST          17
+#define MENU_FM_REGION    3
+#define MENU_THEME        4
+#define MENU_UI           5
+#define MENU_ZOOM         6
+#define MENU_SCROLL       7
+#define MENU_SLEEP        8
+#define MENU_SLEEPMODE    9
+#define MENU_LOADEIBI     10
+#define MENU_USBMODE      11
+#define MENU_BLEMODE      12
+#define MENU_WIFIMODE     13
+#define MENU_ABOUT        14
+#define MENU_CPU          15
 
 
 int8_t settingsIdx = MENU_BRIGHTNESS;
@@ -138,7 +136,6 @@ static const char *settings[] =
   "Brightness",
   "Calibration",
   "RDS",
-  "Timezone",
   "FM Region",
   "Theme",
   "UI Layout",
@@ -152,7 +149,6 @@ static const char *settings[] =
   "Wi-Fi",
   "About",
   "CPU Usage",
-  "DST",
 };
 
 //
@@ -206,59 +202,8 @@ uint8_t sleepModeIdx = SLEEP_LOCKED;
 static const char *sleepModeDesc[] =
 { "Locked", "Unlocked", "CPU Sleep" };
 
-//
-// UTC Offset Menu
-// https://en.wikipedia.org/wiki/List_of_UTC_offsets
-// https://www.timeanddate.com/time/time-zones-interesting.html
-//
-uint8_t utcOffsetIdx = 8;
-const UTCOffset utcOffsets[] =
-{
-  { -12 * 4,      "IDLW"           },
-  { -11 * 4,      "SST/Samoa"      },
-  { -10 * 4,      "HST/Hawaii"     },
-  { -9 * 4 - 2,   "MART"           },
-  { -9 * 4,       "AKST/Anchorage" },
-  { -8 * 4,       "PST/Los Angeles"},
-  { -7 * 4,       "MST/Denver"     },
-  { -6 * 4,       "CST/Chicago"    },
-  { -5 * 4,       "EST/New York"   },
-  { -4 * 4,       "AST/Halifax"    },
-  { -3 * 4 - 2,   "NST/St.John's"  },
-  { -3 * 4,       "BRT/Sao Paulo"  },
-  { -2 * 4 - 2,   "UTC-2:30"       },
-  { -2 * 4,       "WGST/Greenland" },
-  { -1 * 4,       "AZOT/Azores"    },
-  {  0 * 4,       "GMT/London"     },
-  {  1 * 4,       "CET/Paris"      },
-  {  2 * 4,       "EET/Athens"     },
-  {  3 * 4,       "MSK/Moscow"     },
-  {  3 * 4 + 2,   "IRST/Tehran"    },
-  {  4 * 4,       "GST/Dubai"      },
-  {  4 * 4 + 2,   "AFT/Kabul"      },
-  {  5 * 4,       "PKT/Karachi"    },
-  {  5 * 4 + 2,   "IST/India"      },
-  {  5 * 4 + 3,   "NPT/Nepal"      },
-  {  6 * 4,       "BST/Dhaka"      },
-  {  6 * 4 + 2,   "MMT/Yangon"     },
-  {  7 * 4,       "ICT/Bangkok"    },
-  {  8 * 4,       "CST/Beijing"    },
-  {  8 * 4 + 3,   "ACWST"          },
-  {  9 * 4,       "JST/Tokyo"      },
-  {  9 * 4 + 2,   "ACST/Adelaide"  },
-  { 10 * 4,       "AEST/Sydney"    },
-  { 10 * 4 + 2,   "LHST"           },
-  { 11 * 4,       "SBT/Honiara"    },
-  { 12 * 4,       "NZST/Auckland"  },
-  { 12 * 4 + 3,   "CHAST"          },
-  { 13 * 4,       "TOT/Tonga"      },
-  { 13 * 4 + 3,   "CHADT"          },
-  { 14 * 4,       "LINT/Kiritimati"},
-};
-
-bool dstOn = false;
-int getCurrentUTCOffset() { return(utcOffsets[utcOffsetIdx].offset + (dstOn ? 4 : 0)); }
-int getTotalUTCOffsets() { return(ITEM_COUNT(utcOffsets)); }
+// No manual timezone: time is set via RDS CT (local time) or webapp browser sync.
+int getCurrentUTCOffset() { return(0); }
 
 //
 // UI Layout Menu
@@ -688,18 +633,6 @@ static void doRDSMode(int16_t enc)
   if(!(getRDSMode() & RDS_CT)) clockReset();
 }
 
-static void doUTCOffset(int16_t enc)
-{
-  utcOffsetIdx = wrap_range(utcOffsetIdx, enc, 0, LAST_ITEM(utcOffsets));
-  clockRefreshTime();
-}
-
-static void doDST(int16_t enc)
-{
-  if(enc) dstOn = !dstOn;
-  clockRefreshTime();
-}
-
 static void doZoom(int16_t enc)
 {
   zoomMenu = !zoomMenu;
@@ -957,7 +890,6 @@ static void clickSettings(int cmd, bool shortPress)
     case MENU_SCROLL:     currentCmd = CMD_SCROLL;     break;
     case MENU_SLEEP:      currentCmd = CMD_SLEEP;      break;
     case MENU_SLEEPMODE:  currentCmd = CMD_SLEEPMODE;  break;
-    case MENU_UTCOFFSET:  currentCmd = CMD_UTCOFFSET;  break;
     case MENU_USBMODE:    currentCmd = CMD_USBMODE;    break;
     case MENU_BLEMODE:     currentCmd = CMD_BLEMODE;     break;
     case MENU_WIFIMODE:    currentCmd = CMD_WIFIMODE;    break;
@@ -967,7 +899,6 @@ static void clickSettings(int cmd, bool shortPress)
       break;
     case MENU_ABOUT:      currentCmd = CMD_ABOUT;     break;
     case MENU_CPU:        currentCmd = CMD_CPU;       break;
-    case MENU_DST:        currentCmd = CMD_DST;        break;
 
     case MENU_LOADEIBI:
       eibiLoadSchedule();
@@ -1007,8 +938,6 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_WIFIMODE:    doWiFiMode(scrollDirection * enc);break;
     case CMD_ZOOM:       doZoom(enc);break;
     case CMD_SCROLL:     doScrollDir(enc);break;
-    case CMD_UTCOFFSET:  doUTCOffset(scrollDirection * enc);break;
-    case CMD_DST:        doDST(scrollDirection * enc); break;
     case CMD_SQUELCH:    doSquelch(enca);break;
     case CMD_ABOUT:        doAbout(enc);break;
     case CMD_CPU:          cpuDisplayIdx = wrap_range(cpuDisplayIdx, scrollDirection * enc, 0, 1); break;
@@ -1420,6 +1349,9 @@ static void drawRDSMode(int x, int y, int sx)
   int count = ITEM_COUNT(rdsMode);
   for(int i=-2 ; i<3 ; i++)
   {
+    // Don't repeat entries for short lists
+    if(count < 5 && ((rdsModeIdx+i) < 0 || (rdsModeIdx+i) >= count)) continue;
+
     if(i==0) {
       drawZoomedMenu(rdsMode[abs((rdsModeIdx+count+i)%count)].desc);
       spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
@@ -1430,39 +1362,6 @@ static void drawRDSMode(int x, int y, int sx)
     spr.setTextDatum(MC_DATUM);
     spr.drawString(rdsMode[abs((rdsModeIdx+count+i)%count)].desc, 40+x+(sx/2), 64+y+(i*16), 2);
   }
-}
-
-static void drawUTCOffset(int x, int y, int sx)
-{
-  drawCommon(settings[MENU_UTCOFFSET], x, y, sx, true);
-
-  int count = ITEM_COUNT(utcOffsets);
-  uint8_t idx = utcOffsetIdx;
-
-  for(int i=-2 ; i<3 ; i++)
-  {
-    if(i==0)
-    {
-      drawZoomedMenu(utcOffsets[abs((idx+count+i)%count)].desc);
-      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
-    }
-    else
-    {
-      spr.setTextColor(TH.menu_item);
-    }
-
-    spr.setTextDatum(MC_DATUM);
-    spr.drawString(utcOffsets[abs((idx+count+i)%count)].desc, 40+x+(sx/2), 64+y+(i*16), 2);
-  }
-}
-
-static void drawDST(int x, int y, int sx)
-{
-  drawCommon(settings[MENU_DST], x, y, sx, true);
-  drawZoomedMenu(dstOn ? "On" : "Off");
-  spr.setTextDatum(MC_DATUM);
-  spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
-  spr.drawString(dstOn ? "On" : "Off", 40+x+(sx/2), 64+y, 4);
 }
 
 static void drawMemory(int x, int y, int sx)
@@ -1803,8 +1702,6 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_WIFIMODE:    drawWiFiMode(x, y, sx);   break;
     case CMD_ZOOM:       drawZoom(x, y, sx);        break;
     case CMD_SCROLL:     drawScrollDir(x, y, sx);   break;
-    case CMD_UTCOFFSET:  drawUTCOffset(x, y, sx);  break;
-    case CMD_DST:        drawDST(x, y, sx);       break;
     case CMD_SQUELCH:    drawSquelch(x, y, sx);    break;
     case CMD_CPU:        drawCpuDisplay(x, y, sx);    break;
     default:             drawInfo(x, y, sx);           break;

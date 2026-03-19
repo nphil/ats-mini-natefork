@@ -574,6 +574,17 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     return event;
   }
 
+  // ---- Set clock from webapp local time -----------------------------
+  else if(!strcmp(cmd, "settime"))
+  {
+    long hh = 0, mm = 0, ss = 0;
+    if(jsonInt(json, "hh", &hh) && jsonInt(json, "mm", &mm))
+    {
+      jsonInt(json, "ss", &ss);
+      clockSet((uint8_t)hh, (uint8_t)mm, (uint8_t)ss);
+    }
+  }
+
   // ---- Sleep ---------------------------------------------------------
   else if(!strcmp(cmd, "sleep"))
   {
