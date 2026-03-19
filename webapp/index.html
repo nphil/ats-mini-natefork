@@ -1268,6 +1268,8 @@ document.getElementById('btnWfStart').addEventListener('click', async () => {
   if(!rxChar) { log('Not connected','err'); return; }
   wfMeta=null;
   wfClearCanvas();
+  wfPendingRestart = true; // guard: ignore any stale wf_done from a previous session
+                            // cleared to false when the first row of this session arrives
   wfSetActive(true);
   document.getElementById('wfStatus').textContent = 'Streaming…';
   await wfSendStart();
@@ -1301,20 +1303,22 @@ function updateWfZoomLabel() {
 }
 updateWfZoomLabel();
 
-// Band/mode controls — change band/mode on device, then (re)start waterfall so
-// the firmware ack populates Start/End inputs with the new band's real limits.
+// Band/mode controls — change band/mode on device; if waterfall is already running,
+// restart it so the firmware ack populates Start/End inputs with the new band limits.
+// If waterfall is NOT running, just change the device setting and clear the cached
+// window so the next Start picks up fresh band limits automatically.
 async function wfChangeBandMode(cmd, d) {
   await send({cmd, d});
-  // Clear current window — ack from next wf_start will populate fresh limits
   wfBase=null; wfCustomWindow=null;
   document.getElementById('wfStartFreq').value='';
   document.getElementById('wfEndFreq').value='';
-  wfClearCanvas();
-  // Mark as restart if already active, otherwise this is a fresh start
-  wfPendingRestart = wfActive;
-  wfSetActive(true);
-  document.getElementById('wfStatus').textContent = 'Streaming…';
-  await wfSendStart(); // bare → firmware uses new band defaults → ack → inputs populated
+  if(wfActive) {
+    // Already streaming — restart with new band defaults
+    wfClearCanvas();
+    wfPendingRestart = true;
+    await wfSendStart();
+  }
+  // If not active, changes take effect on the next Start click
 }
 document.getElementById('btnWfBandDown').addEventListener('click', () => wfChangeBandMode('band',-1));
 document.getElementById('btnWfBandUp'  ).addEventListener('click', () => wfChangeBandMode('band', 1));
