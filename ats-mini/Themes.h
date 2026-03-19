@@ -72,12 +72,5 @@ int getTotalThemes();
 extern ColorTheme theme[];
 bool switchThemeEditor(int8_t state = 2);
 
-// Custom theme support — curated palette browser
-extern uint8_t customPaletteIdx;  // index into the built-in palette list
-int getCustomPaletteCount();
-const char *getCustomPaletteName(uint8_t idx);
-uint16_t hsvToRgb565(float h, float s, float v);
-uint16_t contrastingTextColor(uint16_t bg565);
-void applyCustomTheme(uint8_t idx);
 
 #endif // THEMES_H

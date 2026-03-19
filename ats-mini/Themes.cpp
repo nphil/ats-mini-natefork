@@ -438,53 +438,493 @@ ColorTheme theme[] =
   },
 
   {
-    // NOTE: This entry is dynamically overwritten by applyCustomTheme() at startup.
-    // It MUST remain the last entry so that getTotalThemes()-1 correctly identifies it.
-    "Custom",
-    0x0000, // bg           (placeholder)
-    0xFFFF, // text
-    0xD69A, // text_muted
+    // Dark flat — deep navy + ice-blue text + electric-blue accent
+    "Cobalt",
+    0x0843, // bg
+    0xDF5F, // text
+    0x6394, // text_muted
     0xF800, // text_warn
-    0xD69A, // smeter_icon
-    0x07E0, // smeter_bar
+    0x6394, // smeter_icon
+    0x349F, // smeter_bar
     0xF800, // smeter_bar_plus
-    0x3186, // smeter_bar_empty
-    0xF800, // save_icon
-    0xD69A, // stereo_icon
+    0x1109, // smeter_bar_empty
+    0x349F, // save_icon
+    0x6394, // stereo_icon
     0xF800, // rf_icon
-    0x07E0, // rf_icon_conn
-    0xFFFF, // batt_voltage
-    0xFFFF, // batt_border
-    0x07E0, // batt_full
+    0x349F, // rf_icon_conn
+    0xDF5F, // batt_voltage
+    0xDF5F, // batt_border
+    0x349F, // batt_full
     0xF800, // batt_low
-    0x0000, // batt_charge
-    0xFFE0, // batt_icon
-    0xD69A, // band_text
-    0xD69A, // mode_text
-    0xD69A, // mode_border
-    0x0000, // box_bg
-    0xD69A, // box_border
-    0xD69A, // box_text
+    0x0843, // batt_charge
+    0x6394, // batt_icon
+    0x6394, // band_text
+    0x6394, // mode_text
+    0x6394, // mode_border
+    0x0843, // box_bg
+    0x6394, // box_border
+    0x6394, // box_text
     0xF800, // box_off_bg
-    0xBEDF, // box_off_text
-    0x0000, // menu_bg
-    0xF800, // menu_border
-    0xFFFF, // menu_hdr
-    0xBEDF, // menu_item
-    0x105B, // menu_hl_bg
-    0xBEDF, // menu_hl_text
-    0xBEDF, // menu_param
-    0xFFFF, // freq_text
-    0xD69A, // funit_text
-    0xF800, // freq_hl
-    0xFFE0, // freq_hl_sel
-    0xD69A, // rds_text
-    0xFFFF, // scale_text
-    0xF800, // scale_pointer
-    0xC638, // scale_line
-    0x94B2, // scan_grid
-    0x0659, // scan_snr
-    0x07E0, // scan_rssi
+    0x6394, // box_off_text
+    0x0843, // menu_bg
+    0x349F, // menu_border
+    0xDF5F, // menu_hdr
+    0x6394, // menu_item
+    0x1109, // menu_hl_bg
+    0xFFFF, // menu_hl_text
+    0x6394, // menu_param
+    0xDF5F, // freq_text
+    0x6394, // funit_text
+    0x349F, // freq_hl
+    0x6394, // freq_hl_sel
+    0x6394, // rds_text
+    0xDF5F, // scale_text
+    0x349F, // scale_pointer
+    0x6394, // scale_line
+    0x1109, // scan_grid
+    0x6394, // scan_snr
+    0x349F, // scan_rssi
+  },
+
+  {
+    // Dark flat — near-black + electric cyan + hot pink accent
+    "Neon",
+    0x0041, // bg
+    0x07DB, // text
+    0x040C, // text_muted
+    0xF800, // text_warn
+    0x040C, // smeter_icon
+    0xF810, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0x10A3, // smeter_bar_empty
+    0xF810, // save_icon
+    0x040C, // stereo_icon
+    0xF800, // rf_icon
+    0xF810, // rf_icon_conn
+    0x07DB, // batt_voltage
+    0x07DB, // batt_border
+    0xF810, // batt_full
+    0xF800, // batt_low
+    0x0041, // batt_charge
+    0x040C, // batt_icon
+    0x040C, // band_text
+    0x040C, // mode_text
+    0x040C, // mode_border
+    0x0041, // box_bg
+    0x040C, // box_border
+    0x040C, // box_text
+    0xF800, // box_off_bg
+    0x040C, // box_off_text
+    0x0041, // menu_bg
+    0xF810, // menu_border
+    0x07DB, // menu_hdr
+    0x040C, // menu_item
+    0x10A3, // menu_hl_bg
+    0xFFFF, // menu_hl_text
+    0x040C, // menu_param
+    0x07DB, // freq_text
+    0x040C, // funit_text
+    0xF810, // freq_hl
+    0x040C, // freq_hl_sel
+    0x040C, // rds_text
+    0x07DB, // scale_text
+    0xF810, // scale_pointer
+    0x040C, // scale_line
+    0x10A3, // scan_grid
+    0x040C, // scan_snr
+    0xF810, // scan_rssi
+  },
+
+  {
+    // Dark flat — dark olive-black + warm amber + burnt orange accent
+    "Autumn",
+    0x1081, // bg
+    0xFE4A, // text
+    0xA384, // text_muted
+    0xF800, // text_warn
+    0xA384, // smeter_icon
+    0xF300, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0x3121, // smeter_bar_empty
+    0xF300, // save_icon
+    0xA384, // stereo_icon
+    0xF800, // rf_icon
+    0xF300, // rf_icon_conn
+    0xFE4A, // batt_voltage
+    0xFE4A, // batt_border
+    0xF300, // batt_full
+    0xF800, // batt_low
+    0x1081, // batt_charge
+    0xA384, // batt_icon
+    0xA384, // band_text
+    0xA384, // mode_text
+    0xA384, // mode_border
+    0x1081, // box_bg
+    0xA384, // box_border
+    0xA384, // box_text
+    0xF800, // box_off_bg
+    0xA384, // box_off_text
+    0x1081, // menu_bg
+    0xF300, // menu_border
+    0xFE4A, // menu_hdr
+    0xA384, // menu_item
+    0x3121, // menu_hl_bg
+    0xFFFF, // menu_hl_text
+    0xA384, // menu_param
+    0xFE4A, // freq_text
+    0xA384, // funit_text
+    0xF300, // freq_hl
+    0xA384, // freq_hl_sel
+    0xA384, // rds_text
+    0xFE4A, // scale_text
+    0xF300, // scale_pointer
+    0xA384, // scale_line
+    0x3121, // scan_grid
+    0xA384, // scan_snr
+    0xF300, // scan_rssi
+  },
+
+  {
+    // Dark gradient — deep purple-black + warm gold + violet accent
+    "Grape",
+    0x0822, // bg
+    0xFE91, // text
+    0x9336, // text_muted
+    0xF800, // text_warn
+    0x9336, // smeter_icon
+    0xB29F, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0x1886, // smeter_bar_empty
+    0xB29F, // save_icon
+    0x9336, // stereo_icon
+    0xF800, // rf_icon
+    0xB29F, // rf_icon_conn
+    0xFE91, // batt_voltage
+    0xFE91, // batt_border
+    0xB29F, // batt_full
+    0xF800, // batt_low
+    0x0822, // batt_charge
+    0x9336, // batt_icon
+    0x9336, // band_text
+    0x9336, // mode_text
+    0x9336, // mode_border
+    0x0822, // box_bg
+    0x9336, // box_border
+    0x9336, // box_text
+    0xF800, // box_off_bg
+    0x9336, // box_off_text
+    0x0822, // menu_bg
+    0xB29F, // menu_border
+    0xFE91, // menu_hdr
+    0x9336, // menu_item
+    0x1886, // menu_hl_bg
+    0xFFFF, // menu_hl_text
+    0x9336, // menu_param
+    0xFE91, // freq_text
+    0x9336, // funit_text
+    0xB29F, // freq_hl
+    0x9336, // freq_hl_sel
+    0x9336, // rds_text
+    0xFE91, // scale_text
+    0xB29F, // scale_pointer
+    0x9336, // scale_line
+    0x1886, // scan_grid
+    0x9336, // scan_snr
+    0xB29F, // scan_rssi
+  },
+
+  {
+    // Dark flat — very dark espresso brown + warm cream + caramel accent
+    "Espresso",
+    0x1061, // bg
+    0xF718, // text
+    0xA3CA, // text_muted
+    0xF800, // text_warn
+    0xA3CA, // smeter_icon
+    0xCBC5, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0x28E2, // smeter_bar_empty
+    0xCBC5, // save_icon
+    0xA3CA, // stereo_icon
+    0xF800, // rf_icon
+    0xCBC5, // rf_icon_conn
+    0xF718, // batt_voltage
+    0xF718, // batt_border
+    0xCBC5, // batt_full
+    0xF800, // batt_low
+    0x1061, // batt_charge
+    0xA3CA, // batt_icon
+    0xA3CA, // band_text
+    0xA3CA, // mode_text
+    0xA3CA, // mode_border
+    0x1061, // box_bg
+    0xA3CA, // box_border
+    0xA3CA, // box_text
+    0xF800, // box_off_bg
+    0xA3CA, // box_off_text
+    0x1061, // menu_bg
+    0xCBC5, // menu_border
+    0xF718, // menu_hdr
+    0xA3CA, // menu_item
+    0x28E2, // menu_hl_bg
+    0xFFFF, // menu_hl_text
+    0xA3CA, // menu_param
+    0xF718, // freq_text
+    0xA3CA, // funit_text
+    0xCBC5, // freq_hl
+    0xA3CA, // freq_hl_sel
+    0xA3CA, // rds_text
+    0xF718, // scale_text
+    0xCBC5, // scale_pointer
+    0xA3CA, // scale_line
+    0x28E2, // scan_grid
+    0xA3CA, // scan_snr
+    0xCBC5, // scan_rssi
+  },
+
+  {
+    // Light flat — warm parchment + dark brown text + terracotta accent
+    "Paper",
+    0xFF9B, // bg
+    0x28C1, // text
+    0x82C8, // text_muted
+    0xF800, // text_warn
+    0x82C8, // smeter_icon
+    0xC203, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0xDE55, // smeter_bar_empty
+    0xC203, // save_icon
+    0x82C8, // stereo_icon
+    0xF800, // rf_icon
+    0xC203, // rf_icon_conn
+    0x28C1, // batt_voltage
+    0x28C1, // batt_border
+    0xC203, // batt_full
+    0xF800, // batt_low
+    0xFF9B, // batt_charge
+    0x82C8, // batt_icon
+    0x82C8, // band_text
+    0x82C8, // mode_text
+    0x82C8, // mode_border
+    0xFF9B, // box_bg
+    0x82C8, // box_border
+    0x82C8, // box_text
+    0xF800, // box_off_bg
+    0x82C8, // box_off_text
+    0xFF9B, // menu_bg
+    0xC203, // menu_border
+    0x28C1, // menu_hdr
+    0x82C8, // menu_item
+    0xDE55, // menu_hl_bg
+    0x0000, // menu_hl_text
+    0x82C8, // menu_param
+    0x28C1, // freq_text
+    0x82C8, // funit_text
+    0xC203, // freq_hl
+    0x82C8, // freq_hl_sel
+    0x82C8, // rds_text
+    0x28C1, // scale_text
+    0xC203, // scale_pointer
+    0x82C8, // scale_line
+    0xDE55, // scan_grid
+    0x82C8, // scan_snr
+    0xC203, // scan_rssi
+  },
+
+  {
+    // Light flat — pale seafoam + dark teal text + forest green accent
+    "Mint",
+    0xE7BD, // bg
+    0x0944, // text
+    0x438C, // text_muted
+    0xF800, // text_warn
+    0x438C, // smeter_icon
+    0x0408, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0xB6F9, // smeter_bar_empty
+    0x0408, // save_icon
+    0x438C, // stereo_icon
+    0xF800, // rf_icon
+    0x0408, // rf_icon_conn
+    0x0944, // batt_voltage
+    0x0944, // batt_border
+    0x0408, // batt_full
+    0xF800, // batt_low
+    0xE7BD, // batt_charge
+    0x438C, // batt_icon
+    0x438C, // band_text
+    0x438C, // mode_text
+    0x438C, // mode_border
+    0xE7BD, // box_bg
+    0x438C, // box_border
+    0x438C, // box_text
+    0xF800, // box_off_bg
+    0x438C, // box_off_text
+    0xE7BD, // menu_bg
+    0x0408, // menu_border
+    0x0944, // menu_hdr
+    0x438C, // menu_item
+    0xB6F9, // menu_hl_bg
+    0x0000, // menu_hl_text
+    0x438C, // menu_param
+    0x0944, // freq_text
+    0x438C, // funit_text
+    0x0408, // freq_hl
+    0x438C, // freq_hl_sel
+    0x438C, // rds_text
+    0x0944, // scale_text
+    0x0408, // scale_pointer
+    0x438C, // scale_line
+    0xB6F9, // scan_grid
+    0x438C, // scan_snr
+    0x0408, // scan_rssi
+  },
+
+  {
+    // Light gradient — pale lavender + deep indigo text + violet accent
+    "Lavender",
+    0xEF3F, // bg
+    0x1888, // text
+    0x62D2, // text_muted
+    0xF800, // text_warn
+    0x62D2, // smeter_icon
+    0x6018, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0xCE1D, // smeter_bar_empty
+    0x6018, // save_icon
+    0x62D2, // stereo_icon
+    0xF800, // rf_icon
+    0x6018, // rf_icon_conn
+    0x1888, // batt_voltage
+    0x1888, // batt_border
+    0x6018, // batt_full
+    0xF800, // batt_low
+    0xEF3F, // batt_charge
+    0x62D2, // batt_icon
+    0x62D2, // band_text
+    0x62D2, // mode_text
+    0x62D2, // mode_border
+    0xEF3F, // box_bg
+    0x62D2, // box_border
+    0x62D2, // box_text
+    0xF800, // box_off_bg
+    0x62D2, // box_off_text
+    0xEF3F, // menu_bg
+    0x6018, // menu_border
+    0x1888, // menu_hdr
+    0x62D2, // menu_item
+    0xCE1D, // menu_hl_bg
+    0x0000, // menu_hl_text
+    0x62D2, // menu_param
+    0x1888, // freq_text
+    0x62D2, // funit_text
+    0x6018, // freq_hl
+    0x62D2, // freq_hl_sel
+    0x62D2, // rds_text
+    0x1888, // scale_text
+    0x6018, // scale_pointer
+    0x62D2, // scale_line
+    0xCE1D, // scan_grid
+    0x62D2, // scan_snr
+    0x6018, // scan_rssi
+  },
+
+  {
+    // Light gradient — warm blush + dark crimson text + vivid red-orange accent
+    "Coral",
+    0xFF5C, // bg
+    0x4003, // text
+    0xB30C, // text_muted
+    0xF800, // text_warn
+    0xB30C, // smeter_icon
+    0xD984, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0xF699, // smeter_bar_empty
+    0xD984, // save_icon
+    0xB30C, // stereo_icon
+    0xF800, // rf_icon
+    0xD984, // rf_icon_conn
+    0x4003, // batt_voltage
+    0x4003, // batt_border
+    0xD984, // batt_full
+    0xF800, // batt_low
+    0xFF5C, // batt_charge
+    0xB30C, // batt_icon
+    0xB30C, // band_text
+    0xB30C, // mode_text
+    0xB30C, // mode_border
+    0xFF5C, // box_bg
+    0xB30C, // box_border
+    0xB30C, // box_text
+    0xF800, // box_off_bg
+    0xB30C, // box_off_text
+    0xFF5C, // menu_bg
+    0xD984, // menu_border
+    0x4003, // menu_hdr
+    0xB30C, // menu_item
+    0xF699, // menu_hl_bg
+    0x0000, // menu_hl_text
+    0xB30C, // menu_param
+    0x4003, // freq_text
+    0xB30C, // funit_text
+    0xD984, // freq_hl
+    0xB30C, // freq_hl_sel
+    0xB30C, // rds_text
+    0x4003, // scale_text
+    0xD984, // scale_pointer
+    0xB30C, // scale_line
+    0xF699, // scan_grid
+    0xB30C, // scan_snr
+    0xD984, // scan_rssi
+  },
+
+  {
+    // Light flat — cool grey + dark navy text + cobalt blue accent
+    "Slate",
+    0xF7BF, // bg
+    0x10C6, // text
+    0x5B51, // text_muted
+    0xF800, // text_warn
+    0x5B51, // smeter_icon
+    0x0298, // smeter_bar
+    0xF800, // smeter_bar_plus
+    0xCE9B, // smeter_bar_empty
+    0x0298, // save_icon
+    0x5B51, // stereo_icon
+    0xF800, // rf_icon
+    0x0298, // rf_icon_conn
+    0x10C6, // batt_voltage
+    0x10C6, // batt_border
+    0x0298, // batt_full
+    0xF800, // batt_low
+    0xF7BF, // batt_charge
+    0x5B51, // batt_icon
+    0x5B51, // band_text
+    0x5B51, // mode_text
+    0x5B51, // mode_border
+    0xF7BF, // box_bg
+    0x5B51, // box_border
+    0x5B51, // box_text
+    0xF800, // box_off_bg
+    0x5B51, // box_off_text
+    0xF7BF, // menu_bg
+    0x0298, // menu_border
+    0x10C6, // menu_hdr
+    0x5B51, // menu_item
+    0xCE9B, // menu_hl_bg
+    0x0000, // menu_hl_text
+    0x5B51, // menu_param
+    0x10C6, // freq_text
+    0x5B51, // funit_text
+    0x0298, // freq_hl
+    0x5B51, // freq_hl_sel
+    0x5B51, // rds_text
+    0x10C6, // scale_text
+    0x0298, // scale_pointer
+    0x5B51, // scale_line
+    0xCE9B, // scan_grid
+    0x5B51, // scan_snr
+    0x0298, // scan_rssi
   },
 };
 
@@ -501,158 +941,4 @@ bool switchThemeEditor(int8_t state)
   return themeEditor;
 }
 
-// Current palette index for the Custom theme slot
-uint8_t customPaletteIdx = 0;
 
-// ---------------------------------------------------------------------------
-// Curated palette definitions: each entry supplies three seed colors in HSV.
-//   bg  — dark background
-//   txt — primary text / frequency display
-//   acc — accent / highlight
-// Muted text and the highlight-bg are derived automatically in applyCustomTheme.
-// ---------------------------------------------------------------------------
-typedef struct {
-  const char *name;
-  float bgH,  bgS,  bgV;   // background
-  float txtH, txtS, txtV;  // primary text / freq
-  float accH, accS, accV;  // accent
-} PaletteDef;
-
-static const PaletteDef kPalettes[] = {
-  // name          bgH   bgS   bgV    txtH  txtS  txtV    accH  accS  accV
-  { "Aurora",      265, 0.85, 0.12,   175, 0.90, 0.90,   120, 0.95, 0.85 },
-  { "Sunset",      345, 0.90, 0.12,    32, 1.00, 0.95,    10, 1.00, 1.00 },
-  { "Phosphor",    190, 0.90, 0.10,   120, 0.85, 0.90,    85, 1.00, 0.95 },
-  { "Deep Sea",    222, 0.90, 0.12,   200, 0.80, 1.00,    45, 1.00, 1.00 },
-  { "Forest",      130, 0.90, 0.10,    80, 0.85, 0.90,    55, 1.00, 1.00 },
-  { "Midnight",    240, 0.75, 0.13,   260, 0.30, 1.00,   290, 0.95, 1.00 },
-  { "Volcano",      20, 0.30, 0.08,    22, 1.00, 1.00,     8, 1.00, 0.95 },
-  { "Arctic",      205, 0.50, 0.15,   200, 0.15, 1.00,   195, 0.90, 1.00 },
-  { "Sakura",      300, 0.65, 0.13,   340, 0.40, 1.00,   350, 0.90, 1.00 },
-  { "Gold Rush",    30, 0.80, 0.10,    48, 0.95, 1.00,    28, 1.00, 0.95 },
-  { "Volt",          0, 0.00, 0.05,    68, 1.00, 1.00,   120, 1.00, 1.00 },
-  { "Twilight",    250, 0.70, 0.13,    45, 0.80, 0.95,   270, 0.90, 1.00 },
-  { "Copper",       20, 0.20, 0.09,    20, 0.90, 0.95,    38, 1.00, 1.00 },
-  { "Jade",        160, 0.60, 0.10,   155, 0.70, 0.90,    90, 1.00, 0.90 },
-  { "Crimson",     208, 0.65, 0.13,     5, 0.90, 0.95,    15, 0.80, 1.00 },
-  { "Glacier",     210, 0.25, 0.10,   200, 0.65, 1.00,     0, 0.00, 1.00 },
-};
-
-int getCustomPaletteCount()
-{
-  return (int)ITEM_COUNT(kPalettes);
-}
-
-const char *getCustomPaletteName(uint8_t idx)
-{
-  if(idx >= (uint8_t)ITEM_COUNT(kPalettes)) idx = 0;
-  return kPalettes[idx].name;
-}
-
-// Convert HSV (h=0..360, s=0..1, v=0..1) to RGB565
-uint16_t hsvToRgb565(float h, float s, float v)
-{
-  float r, g, b;
-  if(s <= 0.0f) { r = g = b = v; }
-  else
-  {
-    float hh = h / 60.0f;
-    int   i  = (int)hh;
-    float ff = hh - (float)i;
-    float p  = v * (1.0f - s);
-    float q  = v * (1.0f - s * ff);
-    float t  = v * (1.0f - s * (1.0f - ff));
-    switch(i % 6)
-    {
-      case 0:  r = v; g = t; b = p; break;
-      case 1:  r = q; g = v; b = p; break;
-      case 2:  r = p; g = v; b = t; break;
-      case 3:  r = p; g = q; b = v; break;
-      case 4:  r = t; g = p; b = v; break;
-      default: r = v; g = p; b = q; break;
-    }
-  }
-  uint8_t r8 = (uint8_t)(r * 255.0f);
-  uint8_t g8 = (uint8_t)(g * 255.0f);
-  uint8_t b8 = (uint8_t)(b * 255.0f);
-  return (uint16_t)(((r8 >> 3) << 11) | ((g8 >> 2) << 5) | (b8 >> 3));
-}
-
-// Return white (0xFFFF) or black (0x0000) depending on bg luminance
-uint16_t contrastingTextColor(uint16_t bg565)
-{
-  uint8_t r = (bg565 >> 11) << 3;
-  uint8_t g = ((bg565 >> 5) & 0x3F) << 2;
-  uint8_t b = (bg565 & 0x1F) << 3;
-  // Weighted luminance (sRGB approximation, scaled to 0-65535)
-  uint32_t lum = (uint32_t)r * 77u + (uint32_t)g * 150u + (uint32_t)b * 29u;
-  return (lum > 128u * 256u) ? 0x0000u : 0xFFFFu;
-}
-
-// Rebuild the Custom theme slot from a curated palette index
-void applyCustomTheme(uint8_t idx)
-{
-  if(idx >= (uint8_t)ITEM_COUNT(kPalettes)) idx = 0;
-  customPaletteIdx = idx;
-
-  const PaletteDef &p = kPalettes[idx];
-
-  // Derive the five colour roles from the three palette seeds
-  uint16_t bg    = hsvToRgb565(p.bgH, p.bgS, p.bgV);
-  uint16_t txt   = hsvToRgb565(p.txtH, p.txtS, p.txtV);
-  uint16_t muted = hsvToRgb565(p.txtH, p.txtS * 0.50f, p.txtV * 0.58f);
-  uint16_t acc   = hsvToRgb565(p.accH, p.accS, p.accV);
-  // Highlight bg: same hue as bg but lifted to a mid-tone
-  float hlV      = fminf(p.bgV * 4.0f, 0.42f);
-  uint16_t hlbg  = hsvToRgb565(p.bgH, p.bgS * 0.75f, hlV);
-  uint16_t hltxt = contrastingTextColor(hlbg);
-  uint16_t brt   = acc;  // alias — used for mid-bright menu items
-
-  // Custom is always the last entry in theme[]
-  ColorTheme *t = &theme[getTotalThemes() - 1];
-
-  t->bg               = bg;
-  t->text             = txt;
-  t->text_muted       = muted;
-  t->text_warn        = 0xF800;
-  t->smeter_icon      = muted;
-  t->smeter_bar       = acc;
-  t->smeter_bar_plus  = 0xF800;
-  t->smeter_bar_empty = hlbg;
-  t->save_icon        = acc;
-  t->stereo_icon      = muted;
-  t->rf_icon          = 0xF800;
-  t->rf_icon_conn     = acc;
-  t->batt_voltage     = txt;
-  t->batt_border      = txt;
-  t->batt_full        = acc;
-  t->batt_low         = 0xF800;
-  t->batt_charge      = bg;
-  t->batt_icon        = brt;
-  t->band_text        = muted;
-  t->mode_text        = muted;
-  t->mode_border      = muted;
-  t->box_bg           = bg;
-  t->box_border       = muted;
-  t->box_text         = muted;
-  t->box_off_bg       = 0xF800;
-  t->box_off_text     = brt;
-  t->menu_bg          = bg;
-  t->menu_border      = acc;
-  t->menu_hdr         = txt;
-  t->menu_item        = brt;
-  t->menu_hl_bg       = hlbg;
-  t->menu_hl_text     = hltxt;
-  t->menu_param       = brt;
-  t->freq_text        = txt;
-  t->funit_text       = muted;
-  t->freq_hl          = acc;
-  t->freq_hl_sel      = brt;
-  t->rds_text         = muted;
-  t->scale_text       = txt;
-  t->scale_pointer    = acc;
-  t->scale_line       = muted;
-  t->scan_grid        = hlbg;
-  t->scan_snr         = brt;
-  t->scan_rssi        = acc;
-}

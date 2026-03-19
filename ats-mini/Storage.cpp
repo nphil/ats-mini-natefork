@@ -214,7 +214,7 @@ void prefsSave(uint32_t items)
     prefs.putUChar("UILayout",    uiLayoutIdx);    // UI Layout
     prefs.putUChar("BLEMode",     bleModeIdx);     // Bluetooth mode
     prefs.putUChar("USBMode",     usbModeIdx);     // USB mode
-    prefs.putUChar("CustomPal",  customPaletteIdx); // Custom theme palette index
+
     prefs.putUChar("CPUDisplay",  cpuDisplayIdx);  // CPU usage display
 
     // Done with global settings
@@ -290,11 +290,7 @@ bool prefsLoad(uint32_t items)
     uiLayoutIdx    = prefs.getUChar("UILayout", uiLayoutIdx);   // UI Layout
     bleModeIdx     = prefs.getUChar("BLEMode",    bleModeIdx);    // Bluetooth mode
     usbModeIdx     = prefs.getUChar("USBMode",    usbModeIdx);    // USB mode
-    customPaletteIdx = prefs.getUChar("CustomPal", 0);              // Custom theme palette index
-    cpuDisplayIdx    = prefs.getUChar("CPUDisplay", 0);             // CPU usage display
-
-    // Rebuild Custom theme slot from the loaded palette index
-    applyCustomTheme(customPaletteIdx);
+    cpuDisplayIdx  = prefs.getUChar("CPUDisplay", 0);              // CPU usage display
 
     // Done with global settings
     prefs.end();

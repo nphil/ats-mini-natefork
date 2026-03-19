@@ -45,7 +45,7 @@
 #define CMD_BLEMODE    0x2E00 // |
 #define CMD_WIFIMODE   0x2F00 // |
 #define CMD_ABOUT         0x3000 //-+
-#define CMD_CUSTOM_THEME  0x3100 // Full-screen color wheel picker
+
 #define CMD_CPU           0x3200 // CPU usage display toggle
 
 // UI Layouts

@@ -59,6 +59,5 @@ void drawAbout();
 void drawAboutHelp(uint8_t arrow);
 void drawSplash();
 
-void drawPaletteBrowser(uint8_t idx);
 
 #endif /* DRAW_H */

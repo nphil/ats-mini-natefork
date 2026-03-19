@@ -522,13 +522,6 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
     return;
   }
 
-  // Color wheel picker is a special case
-  if(currentCmd==CMD_CUSTOM_THEME)
-  {
-    drawPaletteBrowser(customPaletteIdx);
-    return;
-  }
-
   switch(uiLayoutIdx)
   {
     case UI_SMETER:
@@ -542,73 +535,4 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
   spr.pushSprite(0, 0);
 }
 
-//
-// Draw the curated palette browser for the Custom theme.
-// The sprite background has already been filled with TH.bg by drawScreen().
-// applyCustomTheme() is called on every encoder tick, so TH always reflects
-// the currently-previewed palette — no explicit colour lookups needed here.
-//
-void drawPaletteBrowser(uint8_t idx)
-{
-  const int16_t W = 320;
 
-  // ---- Title ---------------------------------------------------------------
-  spr.setTextDatum(TC_DATUM);
-  spr.setTextColor(TH.text_muted, TH.bg);
-  spr.drawString("Custom Theme", W/2, 3, 2);
-
-  // ---- Palette name (largest element — shows the current pick clearly) -----
-  spr.setTextColor(TH.freq_text, TH.bg);
-  spr.drawString(getCustomPaletteName(idx), W/2, 24, 4);
-
-  // ---- Accent rule ---------------------------------------------------------
-  spr.fillRect(20, 56, W-40, 3, TH.scale_pointer);
-
-  // ---- S-meter sample bar --------------------------------------------------
-  spr.fillRect(20, 64, 200, 8, TH.smeter_bar_empty);
-  spr.fillRect(20, 64, 128, 8, TH.smeter_bar);
-  spr.fillRect(148, 64, 24,  8, TH.smeter_bar_plus);
-  spr.setTextDatum(ML_DATUM);
-  spr.setTextColor(TH.smeter_icon, TH.bg);
-  spr.drawString("S7+", 228, 68, 1);
-
-  // ---- Band / frequency / mode row -----------------------------------------
-  spr.setTextDatum(TL_DATUM);
-  spr.setTextColor(TH.band_text, TH.bg);
-  spr.drawString("FM", 20, 79, 2);
-
-  spr.setTextDatum(TR_DATUM);
-  spr.setTextColor(TH.freq_text, TH.bg);
-  spr.drawString("99.5", 218, 78, 4);
-
-  spr.setTextDatum(TL_DATUM);
-  spr.setTextColor(TH.funit_text, TH.bg);
-  spr.drawString("MHz", 222, 89, 2);
-
-  spr.setTextColor(TH.mode_text, TH.bg);
-  spr.drawString("Stereo", 264, 79, 1);
-
-  // ---- Menu highlight sample -----------------------------------------------
-  spr.fillRect(20, 113, W-40, 18, TH.menu_hl_bg);
-  spr.setTextDatum(ML_DATUM);
-  spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
-  spr.drawString("Theme select", 30, 122, 2);
-  spr.setTextDatum(MR_DATUM);
-  spr.setTextColor(TH.menu_param, TH.menu_hl_bg);
-  spr.drawString("Custom", W-30, 122, 2);
-
-  // ---- Muted text sample ---------------------------------------------------
-  spr.setTextDatum(TL_DATUM);
-  spr.setTextColor(TH.text_muted, TH.bg);
-  spr.drawString("RDS: Sample text   Batt 3.8V", 20, 136, 1);
-
-  // ---- Navigation hint with index ------------------------------------------
-  char hint[48];
-  snprintf(hint, sizeof(hint), "%u / %u    Rotate: browse    Click: apply",
-           (unsigned)idx + 1, (unsigned)getCustomPaletteCount());
-  spr.setTextDatum(BC_DATUM);
-  spr.setTextColor(TH.text_muted, TH.bg);
-  spr.drawString(hint, W/2, 168, 1);
-
-  spr.pushSprite(0, 0);
-}

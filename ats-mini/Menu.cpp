@@ -601,22 +601,6 @@ static void doTheme(int16_t enc)
   themeIdx = wrap_range(themeIdx, enc, 0, getTotalThemes() - 1);
 }
 
-// Rotate through the curated palette list with the encoder; live-updates the theme slot
-static void doCustomTheme(int16_t enc)
-{
-  if(!enc) return;
-  customPaletteIdx = (uint8_t)wrap_range((int)customPaletteIdx, enc, 0, getCustomPaletteCount() - 1);
-  applyCustomTheme(customPaletteIdx);
-}
-
-// Click while the color wheel is open: confirm and close
-static void clickCustomTheme(bool shortPress)
-{
-  (void)shortPress;
-  prefsRequestSave(SAVE_SETTINGS);
-  currentCmd = CMD_NONE;
-}
-
 static void doUILayout(int16_t enc)
 {
   uiLayoutIdx = uiLayoutIdx > LAST_ITEM(uiLayoutDesc) ? UI_DEFAULT : wrap_range(uiLayoutIdx, enc, 0, LAST_ITEM(uiLayoutDesc));
@@ -1024,7 +1008,7 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_ABOUT:        doAbout(enc);break;
     case CMD_CPU:          cpuDisplayIdx = wrap_range(cpuDisplayIdx, scrollDirection * enc, 0, 1); break;
     case CMD_SCAN:         return doScanChannel(scrollDirection * enc);
-    case CMD_CUSTOM_THEME: doCustomTheme(scrollDirection * enc);break;
+
     default:             return(false);
   }
 
@@ -1045,15 +1029,10 @@ bool clickHandler(uint16_t cmd, bool shortPress)
     case CMD_SEEK:          clickSeek(shortPress);break;
     case CMD_SCAN:          clickScan(shortPress);break;
     case CMD_FREQ:          return(clickFreq(shortPress));
-    // When clicking while scrolling through themes, enter the color
-    // wheel if the Custom slot is selected; otherwise just close.
     case CMD_THEME:
-      if(themeIdx == getTotalThemes() - 1)
-        currentCmd = CMD_CUSTOM_THEME;
-      else
-        currentCmd = CMD_NONE;
+      prefsRequestSave(SAVE_SETTINGS);
+      currentCmd = CMD_NONE;
       break;
-    case CMD_CUSTOM_THEME:  clickCustomTheme(shortPress);break;
     default:                return(false);
   }
 
