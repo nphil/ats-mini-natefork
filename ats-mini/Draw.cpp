@@ -310,9 +310,9 @@ void drawFrequency(uint32_t freq, int x, int y, int ux, int uy, uint8_t hl)
 //
 void drawScale(uint32_t freq)
 {
-  // Scale pointer
-  spr.fillTriangle(156, 120, 160, 130, 164, 120, TH.scale_pointer);
-  spr.drawLine(160, 130, 160, 169, TH.scale_pointer);
+  // Scale pointer: small upward triangle sitting just above the tick marks.
+  // Kept inside the scale zone (y≥144) so it never overlaps RDS or content.
+  spr.fillTriangle(157, 150, 163, 150, 160, 144, TH.scale_pointer);
 
   spr.setTextDatum(MC_DATUM);
   spr.setTextColor(TH.scale_text);
