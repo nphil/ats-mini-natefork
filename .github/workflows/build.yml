@@ -61,6 +61,23 @@ jobs:
         run: |
           echo "slug=$(git describe --tags --match 'v?.??' --always --dirty || echo v0.00)" >> "$GITHUB_OUTPUT"
 
+      - name: Install ESP32 core with retries
+        run: |
+          # Install arduino-cli so we can pre-fetch the ESP32 core before
+          # compile-sketches runs. Espressif's CDN returns intermittent 502s
+          # on some chip-variant lib packages; retrying fixes it.
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- --destination "$HOME/bin"
+          export PATH="$HOME/bin:$PATH"
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          for attempt in 1 2 3; do
+            arduino-cli core install esp32:esp32@3.3.7 && break
+            echo "Attempt $attempt failed – waiting 30s before retry..."
+            sleep 30
+          done
+
       - name: Compile firmware
         uses: arduino/compile-sketches@v1
         with:
