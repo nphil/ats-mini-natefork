@@ -572,5 +572,3 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
 
   spr.pushSprite(0, 0);
 }
-
-
