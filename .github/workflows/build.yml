@@ -30,7 +30,8 @@ jobs:
   build:
     name: build ${{ matrix.board.profile }}
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
       matrix:
