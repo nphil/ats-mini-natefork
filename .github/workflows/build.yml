@@ -61,13 +61,14 @@ jobs:
         run: |
           echo "slug=$(git describe --tags --match 'v?.??' --always --dirty || echo v0.00)" >> "$GITHUB_OUTPUT"
 
+      - name: Setup arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
       - name: Install ESP32 core with retries
         run: |
-          # Install arduino-cli so we can pre-fetch the ESP32 core before
-          # compile-sketches runs. Espressif's CDN returns intermittent 502s
-          # on some chip-variant lib packages; retrying fixes it.
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- --destination "$HOME/bin"
-          export PATH="$HOME/bin:$PATH"
+          # Pre-fetch the ESP32 core before compile-sketches runs.
+          # Espressif's CDN returns intermittent 502s on some chip-variant
+          # lib packages (esp32p4, esp32h2, etc.); retrying fixes it.
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls \
             https://espressif.github.io/arduino-esp32/package_esp32_index.json
