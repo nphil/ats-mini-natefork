@@ -53,7 +53,6 @@ void drawRadioText(int y, int ymax);
 void drawScale(uint32_t freq);
 
 void drawLayoutDefault(const char *statusLine1, const char *statusLine2);
-void drawLayoutSmeter(const char *statusLine1, const char *statusLine2);
 
 void drawAbout();
 void drawAboutHelp(uint8_t arrow);

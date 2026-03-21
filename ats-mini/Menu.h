@@ -34,7 +34,6 @@
 #define CMD_RDS        0x2300 // |
 #define CMD_FM_REGION  0x2500 // |
 #define CMD_THEME      0x2600 // |
-#define CMD_UI         0x2700 // |
 #define CMD_ZOOM       0x2800 // |
 #define CMD_SCROLL     0x2900 // |
 #define CMD_SLEEP      0x2A00 // |
@@ -46,10 +45,8 @@
 #define CMD_ABOUT         0x3000 //-+
 
 #define CMD_CPU           0x3200 // CPU usage display toggle
-
-// UI Layouts
-#define UI_DEFAULT  0
-#define UI_SMETER   1
+#define CMD_CPU_USAGE     0x3300 // CPU usage display toggle
+#define CMD_CPU_FREQ      0x3400 // CPU frequency selector
 
 // Seek modes
 #define SEEK_DEFAULT  0

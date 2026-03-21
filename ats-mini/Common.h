@@ -162,7 +162,6 @@ extern uint8_t sleepModeIdx;
 extern bool zoomMenu;
 extern int8_t scrollDirection;
 extern uint8_t utcOffsetIdx;
-extern uint8_t uiLayoutIdx;
 
 extern int8_t FmAgcIdx;
 extern int8_t AmAgcIdx;
@@ -184,6 +183,7 @@ extern uint8_t disableAgc;
 
 // CPU.cpp
 extern uint8_t cpuDisplayIdx;
+extern uint8_t cpuFreqIdx;
 void cpuInitTasks();
 bool cpuUpdateLoad();
 uint8_t getCpuLoad(int core);

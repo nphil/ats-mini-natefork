@@ -557,15 +557,7 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
     return;
   }
 
-  switch(uiLayoutIdx)
-  {
-    case UI_SMETER:
-      drawLayoutSmeter(statusLine1, statusLine2);
-      break;
-    default:
-      drawLayoutDefault(statusLine1, statusLine2);
-      break;
-  }
+  drawLayoutDefault(statusLine1, statusLine2);
 
   // Overlay hold-progress bar and toast on top of the drawn layout
   drawHoldProgress();

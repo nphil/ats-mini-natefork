@@ -3,6 +3,7 @@
 #include <freertos/task.h>
 
 uint8_t cpuDisplayIdx = 0;
+uint8_t cpuFreqIdx = 0;
 
 static volatile uint32_t idleCount[2] = {0, 0};
 static uint8_t cpuLoad[2] = {0, 0};

@@ -116,17 +116,16 @@ static const char *menu[] =
 #define MENU_RDS          2
 #define MENU_FM_REGION    3
 #define MENU_THEME        4
-#define MENU_UI           5
-#define MENU_ZOOM         6
-#define MENU_SCROLL       7
-#define MENU_SLEEP        8
-#define MENU_SLEEPMODE    9
-#define MENU_LOADEIBI     10
-#define MENU_USBMODE      11
-#define MENU_BLEMODE      12
-#define MENU_WIFIMODE     13
-#define MENU_ABOUT        14
-#define MENU_CPU          15
+#define MENU_ZOOM         5
+#define MENU_SCROLL       6
+#define MENU_SLEEP        7
+#define MENU_SLEEPMODE    8
+#define MENU_LOADEIBI     9
+#define MENU_USBMODE      10
+#define MENU_BLEMODE      11
+#define MENU_WIFIMODE     12
+#define MENU_ABOUT        13
+#define MENU_CPU          14
 
 
 int8_t settingsIdx = MENU_BRIGHTNESS;
@@ -138,7 +137,6 @@ static const char *settings[] =
   "RDS",
   "FM Region",
   "Theme",
-  "UI Layout",
   "Zoom Menu",
   "Scroll Dir.",
   "Sleep",
@@ -148,7 +146,7 @@ static const char *settings[] =
   "Bluetooth",
   "Wi-Fi",
   "About",
-  "CPU Usage",
+  "CPU",
 };
 
 //
@@ -162,6 +160,16 @@ const FMRegion fmRegions[] = {
 };
 
 int getTotalFmRegions() { return(ITEM_COUNT(fmRegions)); }
+
+//
+// CPU Menu
+//
+
+static int8_t cpuSubmenuIdx = 0;
+static const char *cpuSubDesc[] = { "CPU Usage", "CPU Freq" };
+
+static const char *cpuFreqDesc[] = { "80 MHz", "160 MHz", "240 MHz" };
+static const int   cpuFreqValues[] = { 80, 160, 240 };
 
 //
 // Mode Menu
@@ -204,13 +212,6 @@ static const char *sleepModeDesc[] =
 
 // No manual timezone: time is set via RDS CT (local time) or webapp browser sync.
 int getCurrentUTCOffset() { return(0); }
-
-//
-// UI Layout Menu
-//
-uint8_t uiLayoutIdx = 0;
-static const char *uiLayoutDesc[] =
-{ "Default", "S-Meter" };
 
 //
 // USB Port Mode Menu
@@ -541,11 +542,6 @@ static bool doScanChannel(int16_t enc)
 static void doTheme(int16_t enc)
 {
   themeIdx = wrap_range(themeIdx, enc, 0, getTotalThemes() - 1);
-}
-
-static void doUILayout(int16_t enc)
-{
-  uiLayoutIdx = uiLayoutIdx > LAST_ITEM(uiLayoutDesc) ? UI_DEFAULT : wrap_range(uiLayoutIdx, enc, 0, LAST_ITEM(uiLayoutDesc));
 }
 
 void doAvc(int16_t enc)
@@ -884,7 +880,6 @@ static void clickSettings(int cmd, bool shortPress)
       if(isSSB()) currentCmd = CMD_CAL;
       break;
     case MENU_THEME:      currentCmd = CMD_THEME;      break;
-    case MENU_UI:         currentCmd = CMD_UI;         break;
     case MENU_RDS:        currentCmd = CMD_RDS;        break;
     case MENU_ZOOM:       currentCmd = CMD_ZOOM;       break;
     case MENU_SCROLL:     currentCmd = CMD_SCROLL;     break;
@@ -928,7 +923,6 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_BRT:        doBrt(enca);break;
     case CMD_CAL:        doCal(enca);break;
     case CMD_THEME:      doTheme(scrollDirection * enc);break;
-    case CMD_UI:         doUILayout(scrollDirection * enc);break;
     case CMD_RDS:        doRDSMode(scrollDirection * enc);break;
     case CMD_MEMORY:     doMemory(scrollDirection * enca);break;
     case CMD_SLEEP:      doSleep(enca);break;
@@ -940,7 +934,15 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_SCROLL:     doScrollDir(enc);break;
     case CMD_SQUELCH:    doSquelch(enca);break;
     case CMD_ABOUT:        doAbout(enc);break;
-    case CMD_CPU:          cpuDisplayIdx = wrap_range(cpuDisplayIdx, scrollDirection * enc, 0, 1); break;
+    case CMD_CPU:          cpuSubmenuIdx = wrap_range(cpuSubmenuIdx, scrollDirection * enc, 0, LAST_ITEM(cpuSubDesc)); break;
+    case CMD_CPU_USAGE:    cpuDisplayIdx = wrap_range(cpuDisplayIdx, scrollDirection * enc, 0, 1); break;
+    case CMD_CPU_FREQ:
+    {
+      int prev = cpuFreqIdx;
+      cpuFreqIdx = wrap_range(cpuFreqIdx, scrollDirection * enc, 0, LAST_ITEM(cpuFreqDesc));
+      if (cpuFreqIdx != prev) setCpuFrequencyMhz(cpuFreqValues[cpuFreqIdx]);
+      break;
+    }
     case CMD_SCAN:         return doScanChannel(scrollDirection * enc);
 
     default:             return(false);
@@ -964,6 +966,17 @@ bool clickHandler(uint16_t cmd, bool shortPress)
     case CMD_SCAN:          clickScan(shortPress);break;
     case CMD_FREQ:          return(clickFreq(shortPress));
     case CMD_THEME:
+      prefsRequestSave(SAVE_SETTINGS);
+      currentCmd = CMD_NONE;
+      break;
+    case CMD_CPU:
+      currentCmd = (cpuSubmenuIdx == 0) ? CMD_CPU_USAGE : CMD_CPU_FREQ;
+      break;
+    case CMD_CPU_USAGE:
+      prefsRequestSave(SAVE_SETTINGS);
+      currentCmd = CMD_NONE;
+      break;
+    case CMD_CPU_FREQ:
       prefsRequestSave(SAVE_SETTINGS);
       currentCmd = CMD_NONE;
       break;
@@ -1318,30 +1331,6 @@ static void drawTheme(int x, int y, int sx)
   }
 }
 
-static void drawUILayout(int x, int y, int sx)
-{
-  drawCommon(settings[MENU_UI], x, y, sx, true);
-
-  int count = ITEM_COUNT(uiLayoutDesc);
-  for(int i=-2 ; i<3 ; i++)
-  {
-    if(i==0) {
-      drawZoomedMenu(uiLayoutDesc[abs((uiLayoutIdx+count+i)%count)]);
-      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
-    } else {
-      spr.setTextColor(TH.menu_item);
-    }
-
-    // Prevent repeats for short menus
-    if (count < 5 && ((uiLayoutIdx+i) < 0 || (uiLayoutIdx+i) >= count)) {
-      continue;
-    }
-
-    spr.setTextDatum(MC_DATUM);
-    spr.drawString(uiLayoutDesc[abs((uiLayoutIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
-  }
-}
-
 static void drawRDSMode(int x, int y, int sx)
 {
   drawCommon(settings[MENU_RDS], x, y, sx, true);
@@ -1646,10 +1635,33 @@ static void drawInfo(int x, int y, int sx)
   }
 }
 
-static void drawCpuDisplay(int x, int y, int sx)
+static void drawCpuMenu(int x, int y, int sx)
 {
-  drawCommon(settings[MENU_CPU], x, y, sx);
-  drawZoomedMenu(settings[MENU_CPU]);
+  drawCommon(settings[MENU_CPU], x, y, sx, true);
+
+  int count = ITEM_COUNT(cpuSubDesc);
+  for(int i=-2 ; i<3 ; i++)
+  {
+    if(i==0) {
+      drawZoomedMenu(cpuSubDesc[abs((cpuSubmenuIdx+count+i)%count)]);
+      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+    } else {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    if (count < 5 && ((cpuSubmenuIdx+i) < 0 || (cpuSubmenuIdx+i) >= count)) {
+      continue;
+    }
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(cpuSubDesc[abs((cpuSubmenuIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+  }
+}
+
+static void drawCpuUsage(int x, int y, int sx)
+{
+  drawCommon("CPU Usage", x, y, sx);
+  drawZoomedMenu("CPU Usage");
 
   spr.setTextDatum(MC_DATUM);
   spr.setTextColor(TH.menu_param);
@@ -1664,6 +1676,29 @@ static void drawCpuDisplay(int x, int y, int sx)
     if (f0 > 0) spr.fillRect(x+2, 88+y, f0, 4, TH.smeter_bar);
     spr.fillRect(x+2, 95+y, bw, 4, TH.bg);
     if (f1 > 0) spr.fillRect(x+2, 95+y, f1, 4, TH.smeter_bar_plus);
+  }
+}
+
+static void drawCpuFreq(int x, int y, int sx)
+{
+  drawCommon("CPU Freq", x, y, sx, true);
+
+  int count = ITEM_COUNT(cpuFreqDesc);
+  for(int i=-2 ; i<3 ; i++)
+  {
+    if(i==0) {
+      drawZoomedMenu(cpuFreqDesc[abs((cpuFreqIdx+count+i)%count)]);
+      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+    } else {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    if (count < 5 && ((cpuFreqIdx+i) < 0 || (cpuFreqIdx+i) >= count)) {
+      continue;
+    }
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(cpuFreqDesc[abs((cpuFreqIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
   }
 }
 
@@ -1685,7 +1720,6 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_BAND:       drawBand(x, y, sx);       break;
     case CMD_BANDWIDTH:  drawBandwidth(x, y, sx);  break;
     case CMD_THEME:      drawTheme(x, y, sx);      break;
-    case CMD_UI:         drawUILayout(x, y, sx);   break;
     case CMD_VOLUME:     drawVolume(x, y, sx);     break;
     case CMD_AGC:        drawAgc(x, y, sx);        break;
     case CMD_SOFTMUTE:   drawSoftMuteMaxAtt(x, y, sx);break;
@@ -1703,7 +1737,9 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_ZOOM:       drawZoom(x, y, sx);        break;
     case CMD_SCROLL:     drawScrollDir(x, y, sx);   break;
     case CMD_SQUELCH:    drawSquelch(x, y, sx);    break;
-    case CMD_CPU:        drawCpuDisplay(x, y, sx);    break;
+    case CMD_CPU:        drawCpuMenu(x, y, sx);       break;
+    case CMD_CPU_USAGE:  drawCpuUsage(x, y, sx);      break;
+    case CMD_CPU_FREQ:   drawCpuFreq(x, y, sx);       break;
     default:             drawInfo(x, y, sx);           break;
   }
 }

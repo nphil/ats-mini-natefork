@@ -210,11 +210,11 @@ void prefsSave(uint32_t items)
     prefs.putBool("ScrollDir", scrollDirection<0); // TRUE: Reverse scroll
     prefs.putUChar("Squelch",     currentSquelch); // Squelch
     prefs.putUChar("FmRegion",    FmRegionIdx);    // FM region
-    prefs.putUChar("UILayout",    uiLayoutIdx);    // UI Layout
     prefs.putUChar("BLEMode",     bleModeIdx);     // Bluetooth mode
     prefs.putUChar("USBMode",     usbModeIdx);     // USB mode
 
     prefs.putUChar("CPUDisplay",  cpuDisplayIdx);  // CPU usage display
+    prefs.putUChar("CPUFreq",     cpuFreqIdx);     // CPU frequency index
 
     // Done with global settings
     prefs.end();
@@ -286,10 +286,12 @@ bool prefsLoad(uint32_t items)
     scrollDirection = prefs.getBool("ScrollDir", scrollDirection<0)? -1:1; // TRUE: Reverse scroll
     currentSquelch = prefs.getUChar("Squelch", currentSquelch); // Squelch
     FmRegionIdx    = prefs.getUChar("FmRegion", FmRegionIdx);   // FM region
-    uiLayoutIdx    = prefs.getUChar("UILayout", uiLayoutIdx);   // UI Layout
     bleModeIdx     = prefs.getUChar("BLEMode",    bleModeIdx);    // Bluetooth mode
     usbModeIdx     = prefs.getUChar("USBMode",    usbModeIdx);    // USB mode
     cpuDisplayIdx  = prefs.getUChar("CPUDisplay", 0);              // CPU usage display
+    cpuFreqIdx     = prefs.getUChar("CPUFreq",    0);              // CPU frequency index
+    // Apply saved CPU frequency
+    { const int freqs[] = {80, 160, 240}; if (cpuFreqIdx < 3) setCpuFrequencyMhz(freqs[cpuFreqIdx]); }
 
     // Done with global settings
     prefs.end();
