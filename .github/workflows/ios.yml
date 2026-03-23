@@ -31,6 +31,7 @@ jobs:
 
       - name: Build (unsigned)
         run: |
+          set -o pipefail
           xcodebuild archive \
             -project ios/ATSMini.xcodeproj \
             -scheme ATSMini \
@@ -40,12 +41,14 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE="" \
-            | xcpretty || true
+            PROVISIONING_PROFILE=""
+
+      - name: Inspect archive
+        run: find "$RUNNER_TEMP/ATSMini.xcarchive" -maxdepth 4 | sort
 
       - name: Package IPA
         run: |
-          APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 | head -1)
+          APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive" -name "*.app" -maxdepth 4 | head -1)
           echo "Packaging: $APP"
           mkdir -p Payload
           cp -r "$APP" Payload/
