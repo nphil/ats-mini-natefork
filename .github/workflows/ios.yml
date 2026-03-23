@@ -32,23 +32,23 @@ jobs:
       - name: Build (unsigned)
         run: |
           set -o pipefail
-          xcodebuild archive \
+          xcodebuild build \
             -project ios/ATSMini.xcodeproj \
             -scheme ATSMini \
             -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath "$RUNNER_TEMP/ATSMini.xcarchive" \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE=""
 
-      - name: Inspect archive
-        run: find "$RUNNER_TEMP/ATSMini.xcarchive" -maxdepth 4 | sort
-
       - name: Package IPA
         run: |
-          APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive" -name "*.app" -maxdepth 4 | head -1)
+          APP=$(find "$RUNNER_TEMP/DerivedData" -name "*.app" \
+            -not -path "*/Intermediates*" \
+            -not -path "*-Runner.app*" \
+            -maxdepth 8 | head -1)
           echo "Packaging: $APP"
           mkdir -p Payload
           cp -r "$APP" Payload/
