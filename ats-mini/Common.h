@@ -211,6 +211,7 @@ void     scanExtractChannels();
 float    scanGetRSSI(uint16_t freq);
 float    scanGetSNR(uint16_t freq);
 bool     scanIsDone();
+void     scanClearData();
 uint16_t scanGetStartFreq();
 uint16_t scanGetStep();
 uint16_t scanGetCount();

@@ -12,6 +12,8 @@
 #include <ESPAsyncWebServer.h>
 #include <NTPClient.h>
 #include <ESPmDNS.h>
+#include <Update.h>
+#include <esp_timer.h>
 
 #define CONNECT_TIME  3000  // Time of inactivity to start connecting WiFi
 
@@ -332,6 +334,39 @@ static void webInit()
     }
     request->send(200, "text/plain", "OK");
   });
+
+  // OTA firmware update endpoint
+  server.on("/update", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      bool ok = !Update.hasError();
+      AsyncWebServerResponse *resp = request->beginResponse(200, "text/plain", ok ? "OK" : Update.errorString());
+      resp->addHeader("Connection", "close");
+      request->send(resp);
+      if (ok) {
+        // Restart after response is flushed (~500 ms)
+        static esp_timer_handle_t restartTimer = nullptr;
+        if (!restartTimer) {
+          esp_timer_create_args_t args = {};
+          args.callback = [](void *) { esp_restart(); };
+          args.name     = "ota_restart";
+          esp_timer_create(&args, &restartTimer);
+        }
+        esp_timer_start_once(restartTimer, 500000);
+      }
+    },
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      if (!index) {
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+          Update.printError(Serial);
+      }
+      if (Update.isRunning()) {
+        if (Update.write(data, len) != len)
+          Update.printError(Serial);
+      }
+      if (final && Update.isRunning())
+        Update.end(true);
+    }
+  );
 
   // Start web server
   server.begin();

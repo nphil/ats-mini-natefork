@@ -264,16 +264,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          # Delete the previous "latest" release and its tag cleanly
-          gh release delete latest \
-            --repo '${{ github.repository }}' \
-            --yes --cleanup-tag 2>/dev/null || true
+          REPO='${{ github.repository }}'
+          TITLE="Latest Build (${{ needs.build.outputs.slug }})"
 
-          # Recreate with the fresh binaries from this commit
-          gh release create latest \
-            --repo '${{ github.repository }}' \
-            --prerelease \
-            --title "Latest Build (${{ needs.build.outputs.slug }})" \
-            --notes-file release-notes.md \
-            ./*.zip \
-            ./*-flash.bin
+          # Check if 'latest' release already exists
+          RELEASE_ID=$(gh api "repos/${REPO}/releases/tags/latest" --jq '.id' 2>/dev/null || echo "")
+
+          if [ -n "$RELEASE_ID" ]; then
+            # Delete old assets (filenames change with each slug so they accumulate)
+            gh api "repos/${REPO}/releases/${RELEASE_ID}/assets" --jq '.[].id' \
+              | xargs -r -I{} gh api -X DELETE "repos/${REPO}/releases/assets/{}"
+
+            # Patch metadata in-place — no tag delete/recreate, bypasses ruleset restrictions
+            gh api -X PATCH "repos/${REPO}/releases/${RELEASE_ID}" \
+              -f name="${TITLE}" \
+              -f body="$(cat release-notes.md)" \
+              -F prerelease=true \
+              --silent
+          else
+            # First run: create the release (also creates the 'latest' tag)
+            gh release create latest \
+              --repo "${REPO}" \
+              --prerelease \
+              --title "${TITLE}" \
+              --notes-file release-notes.md
+          fi
+
+          # Upload new assets (--clobber handles any same-name leftovers)
+          gh release upload latest --repo "${REPO}" --clobber ./*.zip ./*-flash.bin

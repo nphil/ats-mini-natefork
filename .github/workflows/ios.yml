@@ -1,0 +1,74 @@
+name: Build iOS App
+
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15        # Xcode 16, required for iOS 18 target
+    permissions:
+      contents: write        # needed to upload to release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Regenerate Xcode project
+        # XcodeGen scans ios/ATSMini/Sources/ so all .swift files are included
+        run: cd ios && xcodegen generate --spec project.yml
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild archive \
+            -project ios/ATSMini.xcodeproj \
+            -scheme ATSMini \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/ATSMini.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE="" \
+            | xcpretty || true
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -r "$RUNNER_TEMP/ATSMini.xcarchive/Products/Applications/ATS-Mini Remote.app" Payload/
+          zip -r ATSMini-unsigned.ipa Payload/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATSMini-unsigned-ipa
+          path: ATSMini-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Attach IPA to latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          REPO='${{ github.repository }}'
+
+          # Only upload if the 'latest' release already exists
+          RELEASE_ID=$(gh api "repos/${REPO}/releases/tags/latest" --jq '.id' 2>/dev/null || echo "")
+          if [ -n "$RELEASE_ID" ]; then
+            gh release upload latest ATSMini-unsigned.ipa \
+              --repo "${REPO}" \
+              --clobber
+          else
+            echo "No 'latest' release found — IPA is available as a build artifact."
+          fi

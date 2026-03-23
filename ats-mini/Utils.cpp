@@ -1,5 +1,6 @@
 #include "driver/rtc_io.h"
 #include "Common.h"
+#include "Ble.h"
 #include "Themes.h"
 #include "Button.h"
 #include "Utils.h"
@@ -208,6 +209,12 @@ bool sleepOn(int x)
       // Disable WiFi
       netStop();
 
+      // Disable BLE
+      bleStop();
+
+      // Drop CPU to 40 MHz (XTAL, PLL off)
+      setCpuFrequencyMhz(40);
+
       // Unmute squelch
       if(muteOn(MUTE_SQUELCH) && !muteOn(MUTE_MAIN)) muteOn(MUTE_FORCE, false);
 
@@ -241,8 +248,14 @@ bool sleepOn(int x)
       rtc_gpio_deinit((gpio_num_t)ENCODER_PUSH_BUTTON);
       pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
       if(muteOn(MUTE_SQUELCH) && !muteOn(MUTE_MAIN)) muteOn(MUTE_FORCE, true);
+
+      // Restore CPU frequency before restarting radios
+      setCpuFrequencyMhz(80);
+
       sleepOn(false);
-      // Enable WiFi
+
+      // Restart BLE and WiFi
+      bleInit(bleModeIdx);
       netInit(wifiModeIdx, false);
     }
   }

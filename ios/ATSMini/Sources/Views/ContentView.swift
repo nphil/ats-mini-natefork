@@ -18,6 +18,9 @@ struct ContentView: View {
             Tab("Log", systemImage: "text.alignleft") {
                 LogTab()
             }
+            Tab("Settings", systemImage: "gearshape") {
+                SettingsTab()
+            }
         }
         .tint(Color.accent)
         .onAppear {
@@ -86,6 +89,24 @@ struct WaterfallTab: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Waterfall")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+// MARK: - Settings Tab
+
+struct SettingsTab: View {
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    FirmwareUpdateCard()
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
         }
     }

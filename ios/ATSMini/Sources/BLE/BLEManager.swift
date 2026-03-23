@@ -21,6 +21,12 @@ final class BLEManager: NSObject, ObservableObject {
     @Published var isScanning = false
     @Published var discoveredDevices: [CBPeripheral] = []
 
+    /// Set before calling startScan() to auto-connect to the first device with this name.
+    var autoConnectName: String?
+
+    /// Name of the currently (or last) connected peripheral — used for auto-reconnect after OTA.
+    private(set) var connectedPeripheralName: String?
+
     weak var radio: RadioState?
 
     private override init() {
@@ -320,9 +326,15 @@ extension BLEManager: CBCentralManagerDelegate {
             discoveredDevices.append(peripheral)
             radio?.log("Found: \(peripheral.name ?? peripheral.identifier.uuidString)")
         }
+        // Auto-connect after OTA reboot
+        if let target = autoConnectName, peripheral.name == target {
+            autoConnectName = nil
+            connect(to: peripheral)
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        connectedPeripheralName = peripheral.name
         radio?.log("Connected to \(peripheral.name ?? "device")", type: .ok)
         peripheral.discoverServices([serviceUUID])
     }

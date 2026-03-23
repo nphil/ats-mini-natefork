@@ -35,7 +35,7 @@
 void drawMessage(const char *msg);
 void drawMessageProgress(const char *msg, uint8_t pct);
 void drawZoomedMenu(const char *text, bool force = false);
-void drawScanGraphs(uint32_t freq);
+void drawScanGraphs(uint32_t freq, bool ghost = false);
 void drawScreen(const char *statusLine1 = 0, const char *statusLine2 = 0);
 
 void drawWiFiIndicator(int x, int y);

@@ -27,6 +27,7 @@ int8_t scanChannelIdx = -1;
 
 static uint32_t scanTime = millis();
 static uint8_t  scanStatus = SCAN_OFF;
+void scanClearData() { scanStatus = SCAN_OFF; }
 
 static uint16_t scanStartFreq;
 static uint16_t scanStep;

@@ -8,8 +8,6 @@
 #include "Button.h"
 #include <math.h>
 
-extern ButtonTracker pb1;
-
 //
 // Draw preferences write indicator
 //
@@ -432,10 +430,28 @@ void drawLongStationName(const char *name, int x, int y)
 //
 // Draw scan graphs
 //
-void drawScanGraphs(uint32_t freq)
+// Blend two RGB565 colours: alpha=0 → bg, alpha=255 → fg
+static uint16_t blendColor(uint16_t fg, uint16_t bg, uint8_t alpha)
+{
+  uint8_t r = (uint8_t)((((fg >> 11) & 0x1F) * alpha + ((bg >> 11) & 0x1F) * (255 - alpha)) / 255);
+  uint8_t g = (uint8_t)((((fg >>  5) & 0x3F) * alpha + ((bg >>  5) & 0x3F) * (255 - alpha)) / 255);
+  uint8_t b = (uint8_t)((( fg        & 0x1F) * alpha + ( bg        & 0x1F) * (255 - alpha)) / 255);
+  return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+void drawScanGraphs(uint32_t freq, bool ghost)
 {
   // Save original center frequency before it is modified below
   uint32_t centerFreq = freq;
+
+  // In ghost mode blend all colours with the background at ~40 % opacity.
+  // Also clamp the drawable height to the scale zone (y=144–169 = 25 px) so
+  // the ghost doesn't bleed into the display content area above the scale.
+  const uint8_t GHOST_ALPHA = 100;
+  const int     maxH = ghost ? 25 : 40;  // max bar height in pixels
+  uint16_t c_grid = ghost ? blendColor(TH.scan_grid, TH.bg, GHOST_ALPHA) : TH.scan_grid;
+  uint16_t c_snr  = ghost ? blendColor(TH.scan_snr,  TH.bg, GHOST_ALPHA) : TH.scan_snr;
+  uint16_t c_rssi = ghost ? blendColor(TH.scan_rssi, TH.bg, GHOST_ALPHA) : TH.scan_rssi;
 
   // Scale offset
   int16_t offset = (freq % 10) / 10.0 * 8;
@@ -455,30 +471,31 @@ void drawScanGraphs(uint32_t freq)
     if(freq >= minFreq && freq <= maxFreq)
     {
       if((freq % 5) == 0) {
-        for(int y=0; y<42; y+=2) {
-          spr.drawPixel(x, 169-y, TH.scan_grid);
+        for(int y=0; y<maxH+2; y+=2) {
+          spr.drawPixel(x, 169-y, c_grid);
         }
       }
 
       if((freq+1) <= maxFreq) {
         for(int xd=x; xd<(x+8); xd+=2) {
-          spr.drawPixel(xd, 169-40, TH.scan_grid);
-          spr.drawPixel(xd, 169-30, TH.scan_grid);
-          spr.drawPixel(xd, 169-20, TH.scan_grid);
-          spr.drawPixel(xd, 169-10, TH.scan_grid);
-          spr.drawPixel(xd, 169-0, TH.scan_grid);
+          // Only draw horizontal gridlines that fall within the drawable zone
+          if(40 <= maxH) spr.drawPixel(xd, 169-40, c_grid);
+          if(30 <= maxH) spr.drawPixel(xd, 169-30, c_grid);
+          if(20 <= maxH) spr.drawPixel(xd, 169-20, c_grid);
+          if(10 <= maxH) spr.drawPixel(xd, 169-10, c_grid);
+          spr.drawPixel(xd, 169-0, c_grid);
         }
-        int snr1 = 40 * scanGetSNR(freq * 10);
-        int snr2 = 40 * scanGetSNR((freq+1) * 10);
-        spr.drawLine(x, 169-snr1, x+8, 169-snr2, TH.scan_snr);
-        int rssi1 = 40 * scanGetRSSI(freq * 10);
-        int rssi2 = 40 * scanGetRSSI((freq+1) * 10);
-        spr.drawLine(x, 169-rssi1, x+8, 169-rssi2, TH.scan_rssi);
+        int snr1 = maxH * scanGetSNR(freq * 10);
+        int snr2 = maxH * scanGetSNR((freq+1) * 10);
+        spr.drawLine(x, 169-snr1, x+8, 169-snr2, c_snr);
+        int rssi1 = maxH * scanGetRSSI(freq * 10);
+        int rssi2 = maxH * scanGetRSSI((freq+1) * 10);
+        spr.drawLine(x, 169-rssi1, x+8, 169-rssi2, c_rssi);
       }
     }
   }
-  // Draw a marker for every detected channel.
-  // Selected channel gets an arrow; others get a small tick.
+  // Draw channel markers only in non-ghost mode
+  if (!ghost)
   for(int ch = 0; ch < scanChannels.count; ch++)
   {
     // Map channel frequency to screen X (same formula as the scale loop above)
@@ -511,38 +528,6 @@ void drawScanGraphs(uint32_t freq)
 //
 // Draw screen according to given command
 //
-// Draw the slim hold-progress bar and action toast while the encoder button is held.
-// The bar fills left→right across the full screen width over HOLD_SLEEP_MS (3 s).
-// Toast labels hint at the action that will fire on release / at the next threshold.
-static void drawHoldProgress()
-{
-  unsigned long holdMs = pb1.getPressedDuration();
-  if(holdMs < SHORT_PRESS_INTERVAL || pushAndRotate) return;
-
-  // --- Progress bar (2 px tall, flush under the top status bar at y=16) ---
-  uint16_t barW = (uint16_t)min(320UL, holdMs * 320UL / HOLD_SLEEP_MS);
-  spr.fillRect(0, 16, 320, 2, TH.smeter_bar_empty);   // track
-  if(barW > 0)
-    spr.fillRect(0, 16, barW, 2, TH.smeter_bar);       // filled portion
-
-  // --- Toast label ---
-  const char *toast = nullptr;
-  if(holdMs >= HOLD_SLEEP_MS - 200)       // ≥ 2.8 s → screen about to turn off
-    toast = "Screen Off";
-  else if(holdMs >= SHORT_PRESS_INTERVAL) // ≥ 0.5 s → will be Volume on release
-    toast = "Volume";
-
-  if(toast)
-  {
-    int tw = spr.textWidth(toast, 2) + 14;  // padding on each side
-    int tx = (320 - tw) / 2;
-    spr.fillRoundRect(tx, 50, tw, 15, 3, TH.menu_hl_bg);
-    spr.setTextDatum(MC_DATUM);
-    spr.setTextColor(TH.menu_hl_text);
-    spr.drawString(toast, 160, 57, 2);
-  }
-}
-
 void drawScreen(const char *statusLine1, const char *statusLine2)
 {
   if(sleepOn()) return;
@@ -558,9 +543,6 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
   }
 
   drawLayoutDefault(statusLine1, statusLine2);
-
-  // Overlay hold-progress bar and toast on top of the drawn layout
-  drawHoldProgress();
 
   spr.pushSprite(0, 0);
 }

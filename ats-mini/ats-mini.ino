@@ -803,12 +803,12 @@ void loop()
       switch(currentCmd)
       {
         case CMD_NONE:
-          // Activate frequency input mode
+          // Activate frequency digit input mode
           currentCmd = CMD_FREQ;
           needRedraw = true;
           break;
         case CMD_FREQ:
-          // Select digit
+          // Select digit to edit
           doSelectDigit(encCount);
           needRedraw = true;
           break;
@@ -871,15 +871,14 @@ void loop()
     }
     else if(pb1st.wasClicked || pb1st.wasShortPressed)
     {
-      // Encoder click or short press
+      // Encoder click or 1s short press
       // Reset timeouts
       elapsedSleep = elapsedCommand = currentTime;
 
       // If in locked/unlocked sleep mode
       if(sleepOn())
       {
-        // If sleep timeout is enabled, exit it via button press of any duration
-        // (users don't need to figure out that a long press is required to wake up the device)
+        // Any press wakes from timed sleep
         if(currentSleep)
         {
           sleepOn(false);
@@ -887,7 +886,7 @@ void loop()
         }
         else if(sleepModeIdx == SLEEP_UNLOCKED)
         {
-          // Allow to adjust the volume in sleep mode
+          // Allow volume adjustment in sleep mode
           if(pb1st.wasShortPressed && currentCmd==CMD_NONE)
             currentCmd = CMD_VOLUME;
           else if(currentCmd==CMD_VOLUME)
@@ -912,13 +911,13 @@ void loop()
       }
       else if(pb1st.wasShortPressed)
       {
-        // Volume shortcut (only active in VFO mode)
+        // 1s hold then release: open volume (only in VFO mode)
         currentCmd = CMD_VOLUME;
         needRedraw = true;
       }
       else
       {
-        // Activate menu
+        // Quick click: open main menu
         currentCmd = CMD_MENU;
         needRedraw = true;
       }
@@ -931,11 +930,6 @@ void loop()
     pushAndRotate = false;
     needRedraw = true;
   }
-
-  // While the button is physically held (and not in push-and-rotate), force a
-  // redraw every loop tick so the hold-progress bar animates smoothly.
-  if(pb1st.isPressed && !pushAndRotate && !sleepOn())
-    needRedraw = true;
 
   // Disable commands control
   if((currentTime - elapsedCommand) > ELAPSED_COMMAND)

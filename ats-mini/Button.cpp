@@ -24,14 +24,12 @@ ButtonTracker::State ButtonTracker::update(bool currentState, unsigned int debou
 
   // Check if debounce period has passed
   if ((now - lastDebounceTime) >= debounceInterval) {
-    // Only consider state change if it's different from stable state
     if (currentState != lastStableState) {
       lastStableState = currentState;
 
-      // Handle press start
       if (currentState) {
         pressStartTime = now;
-      } else { // Handle release
+      } else {
         unsigned long pressDuration = now - pressStartTime;
         if (pressDuration < LONG_PRESS_INTERVAL) {
           if (pressDuration >= SHORT_PRESS_INTERVAL) {
@@ -44,13 +42,12 @@ ButtonTracker::State ButtonTracker::update(bool currentState, unsigned int debou
     }
   }
 
-  // Update current pressed state
   result.isPressed = lastStableState;
 
-  // Check for long press (still pressed)
   if (result.isPressed) {
     result.isLongPressed = ((now - pressStartTime) >= LONG_PRESS_INTERVAL);
   }
+
   return result;
 }
 

@@ -1019,6 +1019,7 @@ void selectBand(uint8_t idx, bool drawLoadingSSB)
   // Load any previously-scanned channels for the new band
   prefsLoadScanChannels(bandIdx);
   scanChannelIdx = -1;
+  scanClearData();   // RSSI data belongs to the old band; hide ghost until new scan
 
   // Check for named frequencies
   identifyFrequency(currentFrequency + currentBFO / 1000);

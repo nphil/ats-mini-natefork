@@ -82,7 +82,11 @@ void drawLayoutDefault(const char *statusLine1, const char *statusLine2)
   }
   else if(!drawWiFiStatus(statusLine1, statusLine2, STATUS_OFFSET_X, STATUS_OFFSET_Y))
   {
-    // Always show the frequency scale
-    drawScale(isSSB()? (currentFrequency + currentBFO/1000) : currentFrequency);
+    uint32_t dispFreq = isSSB()? (currentFrequency + currentBFO/1000) : currentFrequency;
+    // Ghost scan overlay behind the scale (clamped to scale zone y=144–169)
+    if(scanIsDone())
+      drawScanGraphs(dispFreq, true);
+    // Frequency scale always on top
+    drawScale(dispFreq);
   }
 }
