@@ -45,8 +45,10 @@ jobs:
 
       - name: Package IPA
         run: |
+          APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 | head -1)
+          echo "Packaging: $APP"
           mkdir -p Payload
-          cp -r "$RUNNER_TEMP/ATSMini.xcarchive/Products/Applications/ATS-Mini Remote.app" Payload/
+          cp -r "$APP" Payload/
           zip -r ATSMini-unsigned.ipa Payload/
 
       - name: Upload build artifact
