@@ -3,7 +3,7 @@ name: Build iOS App
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*', 'ios-v*']
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
 
       - name: Select Xcode
         run: |
-          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          LATEST=$(find /Applications -maxdepth 1 -type d -name 'Xcode_*.app' 2>/dev/null | sort -V | tail -1)
           if [ -z "$LATEST" ]; then
             LATEST="/Applications/Xcode.app"
           fi
@@ -68,14 +68,30 @@ jobs:
       - name: Determine release tag
         id: tag
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false"             >> "$GITHUB_OUTPUT"
-            echo "title=${GITHUB_REF#refs/tags/}"   >> "$GITHUB_OUTPUT"
+          REF="$GITHUB_REF"
+          if [[ "$REF" == refs/tags/ios-v* ]]; then
+            VER="${REF#refs/tags/ios-v}"
+            {
+              echo "tag=ios-v${VER}"
+              echo "prerelease=false"
+              echo "title=ATS-Mini Remote ${VER}"
+              echo "kind=ios"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ "$REF" == refs/tags/v* ]]; then
+            VER="${REF#refs/tags/}"
+            {
+              echo "tag=${VER}"
+              echo "prerelease=false"
+              echo "title=${VER}"
+              echo "kind=firmware"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "tag=latest"         >> "$GITHUB_OUTPUT"
-            echo "prerelease=true"    >> "$GITHUB_OUTPUT"
-            echo "title=Latest build" >> "$GITHUB_OUTPUT"
+            {
+              echo "tag=latest"
+              echo "prerelease=true"
+              echo "title=Latest build"
+              echo "kind=rolling"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish release
@@ -85,19 +101,31 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           TAG_NAME="${{ steps.tag.outputs.tag }}"
           TITLE="${{ steps.tag.outputs.title }}"
-          
-          if [ "$TAG_NAME" = "latest" ]; then
-            # Only upload if the 'latest' release already exists (created by the firmware workflow)
-            if gh release view latest --repo "${{ github.repository }}" &>/dev/null; then
-              gh release upload latest ATSMini.ipa --clobber --repo "${{ github.repository }}"
+          KIND="${{ steps.tag.outputs.kind }}"
+          REPO="${{ github.repository }}"
+          BUILD_DATE="$(date -u +'%Y-%m-%d %H:%M UTC')"
+
+          if [ "$KIND" = "rolling" ]; then
+            # Only attach to 'latest' if it already exists (created by firmware workflow)
+            if gh release view latest --repo "$REPO" &>/dev/null; then
+              gh release upload latest ATSMini.ipa --clobber --repo "$REPO"
             else
               echo "No 'latest' release found — skipping upload. IPA is available as a build artifact."
             fi
-          else
-            # For version tags, create the release if it doesn't exist, and upload
+          elif [ "$KIND" = "ios" ]; then
+            # iOS-only versioned release — create new
+            NOTES=$(printf 'Unsigned IPA — sideload with AltStore / SideStore.\n\nBuilt from `%s` on %s\n' "$SHORT_SHA" "$BUILD_DATE")
             gh release create "$TAG_NAME" \
+              --repo "$REPO" \
               --title "$TITLE" \
-              --notes "Unsigned IPA — sideload with AltStore. Built from \`$SHORT_SHA\` on $(date -u +'%Y-%m-%d %H:%M UTC')" \
-              || true
-            gh release upload "$TAG_NAME" ATSMini.ipa --clobber
+              --notes "$NOTES" || true
+            gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
+          else
+            # Firmware version tag — attach IPA to the existing firmware release
+            NOTES=$(printf 'Built from `%s` on %s\n' "$SHORT_SHA" "$BUILD_DATE")
+            gh release create "$TAG_NAME" \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --notes "$NOTES" || true
+            gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
           fi
