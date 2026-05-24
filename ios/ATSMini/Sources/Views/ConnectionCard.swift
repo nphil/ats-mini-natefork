@@ -20,14 +20,16 @@ struct ConnectionCard: View {
                         ble.disconnect()
                     }
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .buttonStyle(.glass)
+                    .tint(.red)
                 } else {
                     Button("Connect") {
                         showDevicePicker = true
                         ble.startScan()
                     }
                     .font(.caption.bold())
-                    .foregroundStyle(Color.accent)
+                    .buttonStyle(.glassProminent)
+                    .tint(.accent)
                 }
             }
         }

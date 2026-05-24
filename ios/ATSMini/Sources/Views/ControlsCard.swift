@@ -21,24 +21,56 @@ struct ControlsCard: View {
                 Divider()
 
                 // Action buttons
-                HStack(spacing: 12) {
-                    Button {
-                        ble.sendClick()
-                    } label: {
-                        Label("Encoder Click", systemImage: "button.programmable")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.accent)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        Button {
+                            ble.sendClick()
+                        } label: {
+                            Label("Encoder Click", systemImage: "button.programmable")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.accent)
 
-                    Button {
-                        ble.sendSleep(true)
-                    } label: {
-                        Label("Sleep", systemImage: "moon.fill")
-                            .font(.caption)
+                        Button {
+                            ble.sendSleep(true)
+                        } label: {
+                            Label("Sleep", systemImage: "moon.fill")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(.red)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
+
+                    VStack(spacing: 8) {
+                        Button {
+                            ble.sendClick()
+                        } label: {
+                            Label("Encoder Click", systemImage: "button.programmable")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.accent)
+
+                        Button {
+                            ble.sendSleep(true)
+                        } label: {
+                            Label("Sleep", systemImage: "moon.fill")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(.red)
+                    }
                 }
             }
         }
@@ -56,17 +88,21 @@ struct DeltaRow: View {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(width: 50, alignment: .leading)
             Button { action(-1) } label: {
                 Image(systemName: "chevron.left")
                     .font(.caption)
-                    .frame(width: 32, height: 28)
+                    .frame(minWidth: 32, minHeight: 28)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
             .disabled(!radio.isConnected)
 
             Text(value)
                 .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(minWidth: 80)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -76,9 +112,9 @@ struct DeltaRow: View {
             Button { action(1) } label: {
                 Image(systemName: "chevron.right")
                     .font(.caption)
-                    .frame(width: 32, height: 28)
+                    .frame(minWidth: 32, minHeight: 28)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
             .disabled(!radio.isConnected)
         }
     }

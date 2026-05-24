@@ -33,6 +33,8 @@ struct FrequencyCard: View {
                     VStack(spacing: 4) {
                         Text(radio.formattedFrequency)
                             .font(.system(size: 48, weight: .bold, design: .monospaced))
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(1)
                             .foregroundStyle(Color(red: 0, green: 1, blue: 0.25))
                             .shadow(color: Color(red: 0, green: 1, blue: 0.25).opacity(0.4), radius: 10)
                             .contentTransition(.numericText())
@@ -80,9 +82,31 @@ struct FrequencyCard: View {
                 }
 
                 // Mode info
-                Text("BAND: \(radio.bandName)  MODE: \(radio.modeName)  STEP: \(radio.stepSize)  BW: \(radio.bandwidth)")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        Text("BAND: \(radio.bandName)")
+                        Text("MODE: \(radio.modeName)")
+                        Text("STEP: \(radio.stepSize)")
+                        Text("BW: \(radio.bandwidth)")
+                    }
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
+
+                    VStack(spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("BAND: \(radio.bandName)")
+                            Spacer()
+                            Text("MODE: \(radio.modeName)")
+                        }
+                        HStack(spacing: 8) {
+                            Text("STEP: \(radio.stepSize)")
+                            Spacer()
+                            Text("BW: \(radio.bandwidth)")
+                        }
+                    }
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                }
 
                 // Quick tune
                 if showQuickTune {

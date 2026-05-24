@@ -217,31 +217,68 @@ struct FirmwareUpdateCard: View {
                 }
 
                 // Action buttons
-                HStack(spacing: 10) {
-                    if source == .file {
-                        Button {
-                            showFilePicker = true
-                        } label: {
-                            Label("Choose .bin…", systemImage: "folder")
-                                .frame(maxWidth: .infinity)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        if source == .file {
+                            Button {
+                                showFilePicker = true
+                            } label: {
+                                Label("Choose .bin…", systemImage: "folder")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .disabled(ota.phase.isActive)
+                        } else {
+                            Button {
+                                ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
+                            } label: {
+                                Label("Flash from URL", systemImage: "arrow.down.circle")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .disabled(ota.phase.isActive || firmwareURL.isEmpty)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(ota.phase.isActive)
-                    } else {
-                        Button {
-                            ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
-                        } label: {
-                            Label("Flash from URL", systemImage: "arrow.down.circle")
-                                .frame(maxWidth: .infinity)
+
+                        if ota.phase != .idle {
+                            Button("Reset", role: .cancel) { ota.reset() }
+                                .buttonStyle(.glass)
+                                .disabled(ota.phase.isActive)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(ota.phase.isActive || firmwareURL.isEmpty)
                     }
 
-                    if ota.phase != .idle {
-                        Button("Reset", role: .cancel) { ota.reset() }
-                            .buttonStyle(.bordered)
+                    VStack(spacing: 8) {
+                        if source == .file {
+                            Button {
+                                showFilePicker = true
+                            } label: {
+                                Label("Choose .bin…", systemImage: "folder")
+                                    .frame(maxWidth: .infinity)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            .buttonStyle(.glassProminent)
                             .disabled(ota.phase.isActive)
+                        } else {
+                            Button {
+                                ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
+                            } label: {
+                                Label("Flash from URL", systemImage: "arrow.down.circle")
+                                    .frame(maxWidth: .infinity)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .disabled(ota.phase.isActive || firmwareURL.isEmpty)
+                        }
+
+                        if ota.phase != .idle {
+                            Button("Reset", role: .cancel) { ota.reset() }
+                                .frame(maxWidth: .infinity)
+                                .buttonStyle(.glass)
+                                .disabled(ota.phase.isActive)
+                        }
                     }
                 }
 

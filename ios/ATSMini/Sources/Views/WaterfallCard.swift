@@ -32,8 +32,10 @@ struct WaterfallCard: View {
                         } label: {
                             Label("Stop", systemImage: "stop.fill")
                                 .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glassProminent)
                         .tint(.red)
                     } else {
                         Button {
@@ -42,8 +44,10 @@ struct WaterfallCard: View {
                         } label: {
                             Label("Start", systemImage: "play.fill")
                                 .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glassProminent)
                         .tint(.green)
                         .disabled(!radio.isConnected)
                     }
@@ -55,7 +59,7 @@ struct WaterfallCard: View {
                         Image(systemName: "minus.magnifyingglass")
                             .font(.caption)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(radio.waterfallZoom <= 0)
 
                     Text("x\(1 << radio.waterfallZoom)")
@@ -68,82 +72,172 @@ struct WaterfallCard: View {
                         Image(systemName: "plus.magnifyingglass")
                             .font(.caption)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(radio.waterfallZoom >= 5)
                 }
 
                 // Band/Mode controls
-                HStack(spacing: 8) {
-                    Text("Band")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Button { ble.sendDelta("band", delta: -1) } label: {
-                        Image(systemName: "chevron.left").font(.caption2)
-                    }
-                    .buttonStyle(.bordered)
-                    Text(radio.bandName)
-                        .font(.system(.caption, design: .monospaced))
-                    Button { ble.sendDelta("band", delta: 1) } label: {
-                        Image(systemName: "chevron.right").font(.caption2)
-                    }
-                    .buttonStyle(.bordered)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        HStack(spacing: 4) {
+                            Text("Band")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Button { ble.sendDelta("band", delta: -1) } label: {
+                                Image(systemName: "chevron.left").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                            Text(radio.bandName)
+                                .font(.system(.caption, design: .monospaced))
+                            Button { ble.sendDelta("band", delta: 1) } label: {
+                                Image(systemName: "chevron.right").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                        }
 
-                    Spacer()
+                        Spacer()
 
-                    Text("Mode")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Button { ble.sendDelta("mode", delta: -1) } label: {
-                        Image(systemName: "chevron.left").font(.caption2)
+                        HStack(spacing: 4) {
+                            Text("Mode")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Button { ble.sendDelta("mode", delta: -1) } label: {
+                                Image(systemName: "chevron.left").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                            Text(radio.modeName)
+                                .font(.system(.caption, design: .monospaced))
+                            Button { ble.sendDelta("mode", delta: 1) } label: {
+                                Image(systemName: "chevron.right").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    Text(radio.modeName)
-                        .font(.system(.caption, design: .monospaced))
-                    Button { ble.sendDelta("mode", delta: 1) } label: {
-                        Image(systemName: "chevron.right").font(.caption2)
+
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Band")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button { ble.sendDelta("band", delta: -1) } label: {
+                                Image(systemName: "chevron.left").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                            Text(radio.bandName)
+                                .font(.system(.caption, design: .monospaced))
+                            Button { ble.sendDelta("band", delta: 1) } label: {
+                                Image(systemName: "chevron.right").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                        }
+
+                        HStack {
+                            Text("Mode")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button { ble.sendDelta("mode", delta: -1) } label: {
+                                Image(systemName: "chevron.left").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                            Text(radio.modeName)
+                                .font(.system(.caption, design: .monospaced))
+                            Button { ble.sendDelta("mode", delta: 1) } label: {
+                                Image(systemName: "chevron.right").font(.caption2)
+                            }
+                            .buttonStyle(.glass)
+                        }
                     }
-                    .buttonStyle(.bordered)
                 }
 
                 // Freq range inputs
-                HStack(spacing: 8) {
-                    Text("Start")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    TextField(radio.isFM ? "87.5" : "530", text: $startFreqText)
-                        .font(.system(.caption, design: .monospaced))
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.decimalPad)
-                        .frame(width: 80)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        Text("Start")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        TextField(radio.isFM ? "87.5" : "530", text: $startFreqText)
+                            .font(.system(.caption, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.decimalPad)
+                            .frame(width: 60)
 
-                    Text("End")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    TextField(radio.isFM ? "108.0" : "1700", text: $endFreqText)
-                        .font(.system(.caption, design: .monospaced))
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.decimalPad)
-                        .frame(width: 80)
+                        Text("End")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        TextField(radio.isFM ? "108.0" : "1700", text: $endFreqText)
+                            .font(.system(.caption, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.decimalPad)
+                            .frame(width: 60)
 
-                    Text(radio.isFM ? "MHz" : "kHz")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        Text(radio.isFM ? "MHz" : "kHz")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
 
-                    Button("Apply") {
-                        applyRange()
+                        Button("Apply") {
+                            applyRange()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.glass)
+                        .tint(.accent)
+
+                        Button("Reset") {
+                            radio.waterfallRows.removeAll()
+                            radio.waterfallMeta = nil
+                            startFreqText = ""
+                            endFreqText = ""
+                        }
+                        .font(.caption)
+                        .buttonStyle(.glass)
                     }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                    .tint(.accent)
 
-                    Button("Reset") {
-                        radio.waterfallRows.removeAll()
-                        radio.waterfallMeta = nil
-                        startFreqText = ""
-                        endFreqText = ""
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text("Start")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            TextField(radio.isFM ? "87.5" : "530", text: $startFreqText)
+                                .font(.system(.caption, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                                .keyboardType(.decimalPad)
+                                .frame(maxWidth: .infinity)
+
+                            Text("End")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            TextField(radio.isFM ? "108.0" : "1700", text: $endFreqText)
+                                .font(.system(.caption, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                                .keyboardType(.decimalPad)
+                                .frame(maxWidth: .infinity)
+
+                            Text(radio.isFM ? "MHz" : "kHz")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        HStack(spacing: 8) {
+                            Button("Apply") {
+                                applyRange()
+                            }
+                            .font(.caption)
+                            .buttonStyle(.glass)
+                            .tint(.accent)
+                            .frame(maxWidth: .infinity)
+
+                            Button("Reset") {
+                                radio.waterfallRows.removeAll()
+                                radio.waterfallMeta = nil
+                                startFreqText = ""
+                                endFreqText = ""
+                            }
+                            .font(.caption)
+                            .buttonStyle(.glass)
+                            .frame(maxWidth: .infinity)
+                        }
                     }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
                 }
 
                 // Waterfall canvas

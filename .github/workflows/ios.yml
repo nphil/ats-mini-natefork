@@ -2,31 +2,36 @@ name: Build iOS App
 
 on:
   push:
-    branches:
-      - '**'
-    paths:
-      - 'ios/**'
-      - '.github/workflows/ios.yml'
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    runs-on: macos-15        # Xcode 16, required for iOS 18 target
-    permissions:
-      contents: write        # needed to upload to release
+    name: Build unsigned IPA
+    runs-on: macos-15        # Xcode 16, required for iOS 26 target
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Select Xcode 16
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LATEST" ]; then
+            LATEST="/Applications/Xcode.app"
+          fi
+          echo "Using: $LATEST"
+          sudo xcode-select -s "$LATEST"
+          xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Regenerate Xcode project
-        # XcodeGen scans ios/ATSMini/Sources/ so all .swift files are included
+      - name: Generate Xcode project
         run: cd ios && xcodegen generate --spec project.yml
 
       - name: Build (unsigned)
@@ -49,31 +54,43 @@ jobs:
             -not -path "*/Intermediates*" \
             -not -path "*-Runner.app*" \
             -maxdepth 8 | head -1)
-          echo "Packaging: $APP"
+          if [ -z "$APP" ]; then
+            echo "❌ .app not found. Listing derived data:"
+            find "$RUNNER_TEMP/DerivedData" -maxdepth 6 2>/dev/null || echo "(DerivedData missing entirely)"
+            exit 1
+          fi
+          echo "✅ Found app at: $APP"
           mkdir -p Payload
           cp -r "$APP" Payload/
-          zip -r ATSMini-unsigned.ipa Payload/
+          zip -r ATSMini.ipa Payload/
+          echo "IPA size: $(du -sh ATSMini.ipa | cut -f1)"
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ATSMini-unsigned-ipa
-          path: ATSMini-unsigned.ipa
-          if-no-files-found: error
-
-      - name: Attach IPA to latest release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Determine release tag
+        id: tag
         run: |
-          REPO='${{ github.repository }}'
-
-          # Only upload if the 'latest' release already exists
-          RELEASE_ID=$(gh api "repos/${REPO}/releases/tags/latest" --jq '.id' 2>/dev/null || echo "")
-          if [ -n "$RELEASE_ID" ]; then
-            gh release upload latest ATSMini-unsigned.ipa \
-              --repo "${REPO}" \
-              --clobber
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false"             >> "$GITHUB_OUTPUT"
+            echo "title=${GITHUB_REF#refs/tags/}"   >> "$GITHUB_OUTPUT"
           else
-            echo "No 'latest' release found — IPA is available as a build artifact."
+            echo "tag=latest"         >> "$GITHUB_OUTPUT"
+            echo "prerelease=true"    >> "$GITHUB_OUTPUT"
+            echo "title=Latest build" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAG_NAME="${{ steps.tag.outputs.tag }}"
+          TITLE="${{ steps.tag.outputs.title }}"
+          
+          # Try to create the release, but ignore failure if it already exists
+          gh release create "$TAG_NAME" \
+            --title "$TITLE" \
+            --notes "Unsigned IPA — sideload with AltStore. Built from \`$SHORT_SHA\` on $(date -u +'%Y-%m-%d %H:%M UTC')" \
+            ${{ steps.tag.outputs.prerelease == 'true' && '--prerelease' || '' }} || true
+            
+          # Upload the IPA, overwrite it if it exists
+          gh release upload "$TAG_NAME" ATSMini.ipa --clobber

@@ -31,13 +31,15 @@ struct PresetsCard: View {
                     TextField("Preset name...", text: $presetName)
                         .font(.system(.caption, design: .monospaced))
                         .textFieldStyle(.roundedBorder)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Button("Save") {
                         let name = presetName.isEmpty ? "Preset" : presetName
                         ble.sendSavePreset(name: String(name.prefix(19)))
                         presetName = ""
                     }
                     .font(.caption.bold())
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .tint(.green)
                     .disabled(!radio.isConnected || radio.scanData == nil)
                 }
@@ -51,6 +53,8 @@ struct PresetsCard: View {
                                 TextField("Name", text: $editingName)
                                     .font(.system(.caption, design: .monospaced))
                                     .textFieldStyle(.roundedBorder)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                                     .onSubmit {
                                         let newName = String(editingName.prefix(19))
                                         if !newName.isEmpty, newName != preset.name {
@@ -61,6 +65,8 @@ struct PresetsCard: View {
                             } else {
                                 Text(preset.name)
                                     .font(.system(.caption, design: .monospaced))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                                     .onTapGesture {
                                         editingPresetIdx = preset.idx
                                         editingName = preset.name
@@ -72,12 +78,13 @@ struct PresetsCard: View {
                             Text("\(preset.channelCount) ch")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
 
                             Button("Load") {
                                 ble.sendLoadPreset(idx: preset.idx)
                             }
                             .font(.caption2)
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                             .tint(.accent)
 
                             Button {
@@ -86,7 +93,7 @@ struct PresetsCard: View {
                                 Image(systemName: "xmark")
                                     .font(.caption2)
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                             .tint(.red)
                         }
                     }

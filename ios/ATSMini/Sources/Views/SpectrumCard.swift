@@ -40,33 +40,77 @@ struct SpectrumCard: View {
                 }
 
                 // Controls
-                HStack(spacing: 8) {
-                    Picker("Step", selection: $selectedStep) {
-                        ForEach(stepOptions, id: \.0) { option in
-                            Text(option.1).tag(option.0)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        Picker("Step", selection: $selectedStep) {
+                            ForEach(stepOptions, id: \.0) { option in
+                                Text(option.1).tag(option.0)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .font(.caption)
+
+                        Button {
+                            ble.sendScan(step: selectedStep)
+                        } label: {
+                            Label("Scan", systemImage: "play.fill")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.accent)
+                        .disabled(!radio.isConnected || radio.isScanning)
+
+                        Button {
+                            radio.scanData = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.red)
+                    }
+
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Step size")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Picker("Step", selection: $selectedStep) {
+                                ForEach(stepOptions, id: \.0) { option in
+                                    Text(option.1).tag(option.0)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                ble.sendScan(step: selectedStep)
+                            } label: {
+                                Label("Scan", systemImage: "play.fill")
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
+                            .tint(.accent)
+                            .disabled(!radio.isConnected || radio.isScanning)
+
+                            Button {
+                                radio.scanData = nil
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption)
+                                    .frame(width: 44)
+                            }
+                            .buttonStyle(.glass)
+                            .tint(.red)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .font(.caption)
-
-                    Button {
-                        ble.sendScan(step: selectedStep)
-                    } label: {
-                        Label("Scan", systemImage: "play.fill")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.accent)
-                    .disabled(!radio.isConnected || radio.isScanning)
-
-                    Button {
-                        radio.scanData = nil
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
                 }
 
                 // Canvas

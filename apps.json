@@ -1,0 +1,30 @@
+{
+  "name": "ATS-Mini Remote Repo",
+  "subtitle": "Repository for the ATS-Mini Remote iOS app",
+  "description": "An AltStore/Feather compatible source for the ATS-Mini Remote iOS application.",
+  "iconURL": "https://raw.githubusercontent.com/nphil/ats-mini-natefork/main/ios/AppIcon.png",
+  "website": "https://github.com/nphil/ats-mini-natefork",
+  "tintColor": "#00D4FF",
+  "apps": [
+    {
+      "name": "ATS-Mini Remote",
+      "bundleIdentifier": "com.atsmini.app",
+      "developerName": "nphil",
+      "subtitle": "Remote control for ATS-Mini Receiver",
+      "localizedDescription": "Control your ATS-Mini receiver over Bluetooth LE. Tune frequencies, manage presets, visualize spectrum/waterfall, and perform OTA firmware updates.",
+      "iconURL": "https://raw.githubusercontent.com/nphil/ats-mini-natefork/main/ios/AppIcon.png",
+      "tintColor": "#00D4FF",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "latest",
+          "buildVersion": "latest",
+          "date": "2026-05-24T11:15:00Z",
+          "localizedDescription": "Rolling release that automatically points to the latest build from the main branch.",
+          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/latest/ATSMini.ipa",
+          "size": 15000000
+        }
+      ]
+    }
+  ]
+}
