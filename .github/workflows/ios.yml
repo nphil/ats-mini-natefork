@@ -86,11 +86,19 @@ jobs:
           TAG_NAME="${{ steps.tag.outputs.tag }}"
           TITLE="${{ steps.tag.outputs.title }}"
           
-          # Try to create the release, but ignore failure if it already exists
-          gh release create "$TAG_NAME" \
-            --title "$TITLE" \
-            --notes "Unsigned IPA — sideload with AltStore. Built from \`$SHORT_SHA\` on $(date -u +'%Y-%m-%d %H:%M UTC')" \
-            ${{ steps.tag.outputs.prerelease == 'true' && '--prerelease' || '' }} || true
-            
-          # Upload the IPA, overwrite it if it exists
-          gh release upload "$TAG_NAME" ATSMini.ipa --clobber
+          if [ "$TAG_NAME" = "latest" ]; then
+            # Only upload if the 'latest' release already exists (created by the firmware workflow)
+            RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/latest" --jq '.id' 2>/dev/null || echo "")
+            if [ -n "$RELEASE_ID" ]; then
+              gh release upload latest ATSMini.ipa --clobber
+            else
+              echo "No 'latest' release found — skipping upload. IPA is available as a build artifact."
+            fi
+          else
+            # For version tags, create the release if it doesn't exist, and upload
+            gh release create "$TAG_NAME" \
+              --title "$TITLE" \
+              --notes "Unsigned IPA — sideload with AltStore. Built from \`$SHORT_SHA\` on $(date -u +'%Y-%m-%d %H:%M UTC')" \
+              || true
+            gh release upload "$TAG_NAME" ATSMini.ipa --clobber
+          fi
