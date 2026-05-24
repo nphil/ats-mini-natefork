@@ -19,6 +19,14 @@
         {
           "version": "2.0",
           "buildVersion": "2.0",
+          "date": "2026-05-24T15:20:27Z",
+          "localizedDescription": "Initial iOS release with optimized iOS 26 SwiftUI layout adjustments, featuring native glass button styles and ViewThatFits dynamic type wrapping.",
+          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/v2.0/ATSMini.ipa",
+          "size": 396630
+        },
+        {
+          "version": "2.0",
+          "buildVersion": "2.0",
           "date": "2026-05-24T11:20:00-04:00",
           "localizedDescription": "Initial iOS release with optimized iOS 26 SwiftUI layout adjustments, featuring native glass button styles and ViewThatFits dynamic type wrapping.",
           "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/v2.0/ATSMini.ipa",
