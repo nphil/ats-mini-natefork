@@ -5,30 +5,31 @@ struct RDSCard: View {
 
     var body: some View {
         GlassCard {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
+            VStack(alignment: .leading, spacing: 8) {
+
+                CardHeader(title: "RDS", trailing: radio.rdsTime.isEmpty ? nil : radio.rdsTime)
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     if !radio.rdsStation.isEmpty {
                         Text(radio.rdsStation)
-                            .font(.system(.headline, design: .monospaced))
-                            .foregroundStyle(Color.accent)
+                            .font(.title3.monospaced().weight(.semibold))
+                            .foregroundStyle(.accent)
                     }
-                    Spacer()
-                    if !radio.rdsTime.isEmpty {
-                        Text(radio.rdsTime)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(Color(red: 0, green: 1, blue: 0.25))
+                    if !radio.rdsPTY.isEmpty {
+                        Text(radio.rdsPTY)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .glassEffect(.regular, in: .capsule)
                     }
                 }
-                if !radio.rdsPTY.isEmpty {
-                    Text(radio.rdsPTY)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+
                 if !radio.rdsText.isEmpty {
                     Text(radio.rdsText)
-                        .font(.caption2)
+                        .font(.subheadline)
                         .foregroundStyle(.primary)
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
             }
         }

@@ -6,117 +6,92 @@ struct SpectrumCard: View {
     @State private var selectedStep = 10
 
     private let stepOptions = [
-        (5, "Narrow (1 MHz)"),
-        (10, "Normal (2 MHz)"),
-        (25, "Wide (5 MHz)"),
-        (50, "Full (10 MHz)")
+        (5,  "Narrow",   "1 MHz"),
+        (10, "Normal",   "2 MHz"),
+        (25, "Wide",     "5 MHz"),
+        (50, "Full",     "10 MHz")
     ]
+
+    private var selectedStepLabel: String {
+        if let opt = stepOptions.first(where: { $0.0 == selectedStep }) {
+            return "\(opt.1) · \(opt.2)"
+        }
+        return "Normal"
+    }
 
     var body: some View {
         GlassCard {
-            VStack(spacing: 10) {
-                // Header
-                HStack {
-                    Text("SPECTRUM")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .tracking(1)
-                    Spacer()
-                    if radio.isScanning {
-                        Text("Scanning... \(Int(radio.scanProgress))%")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    } else if let scan = radio.scanData {
-                        Text("\(scan.pointCount) pts")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 14) {
 
-                // Scan progress
+                // Header
+                CardHeader(
+                    title: "Spectrum",
+                    trailing: radio.isScanning
+                        ? "Scanning \(Int(radio.scanProgress))%"
+                        : (radio.scanData.map { "\($0.pointCount) pts" } ?? nil)
+                )
+
                 if radio.isScanning {
                     ProgressView(value: radio.scanProgress, total: 100)
                         .tint(.accent)
                 }
 
-                // Controls
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        Picker("Step", selection: $selectedStep) {
-                            ForEach(stepOptions, id: \.0) { option in
-                                Text(option.1).tag(option.0)
+                // Step selector (own row, room to breathe)
+                LabeledContent("Step") {
+                    Menu {
+                        ForEach(stepOptions, id: \.0) { opt in
+                            Button {
+                                selectedStep = opt.0
+                            } label: {
+                                if opt.0 == selectedStep {
+                                    Label("\(opt.1) (\(opt.2))", systemImage: "checkmark")
+                                } else {
+                                    Text("\(opt.1) (\(opt.2))")
+                                }
                             }
                         }
-                        .pickerStyle(.menu)
-                        .font(.caption)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(selectedStepLabel)
+                                .font(.subheadline.weight(.medium))
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                        }
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.glass)
+                    .disabled(radio.isScanning)
+                }
 
+                // Canvas — give it height
+                SpectrumCanvas()
+                    .frame(height: 200)
+                    .clipShape(.rect(cornerRadius: 14))
+
+                // Action row — full-width primary, compact destructive
+                GlassEffectContainer {
+                    HStack(spacing: 10) {
                         Button {
                             ble.sendScan(step: selectedStep)
                         } label: {
-                            Label("Scan", systemImage: "play.fill")
-                                .font(.caption)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                            Label(radio.isScanning ? "Scanning…" : "Start Scan", systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.glassProminent)
                         .tint(.accent)
                         .disabled(!radio.isConnected || radio.isScanning)
 
-                        Button {
+                        Button(role: .destructive) {
                             radio.scanData = nil
                         } label: {
-                            Image(systemName: "xmark")
-                                .font(.caption)
+                            Image(systemName: "trash")
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.glass)
-                        .tint(.red)
-                    }
-
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Step size")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Picker("Step", selection: $selectedStep) {
-                                ForEach(stepOptions, id: \.0) { option in
-                                    Text(option.1).tag(option.0)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        }
-
-                        HStack(spacing: 8) {
-                            Button {
-                                ble.sendScan(step: selectedStep)
-                            } label: {
-                                Label("Scan", systemImage: "play.fill")
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.glass)
-                            .tint(.accent)
-                            .disabled(!radio.isConnected || radio.isScanning)
-
-                            Button {
-                                radio.scanData = nil
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.caption)
-                                    .frame(width: 44)
-                            }
-                            .buttonStyle(.glass)
-                            .tint(.red)
-                        }
+                        .disabled(radio.scanData == nil)
                     }
                 }
-
-                // Canvas
-                SpectrumCanvas()
-                    .frame(height: 160)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -124,7 +99,6 @@ struct SpectrumCard: View {
 
 struct SpectrumCanvas: View {
     @EnvironmentObject var radio: RadioState
-    @ObservedObject private var ble = BLEManager.shared
 
     var body: some View {
         Canvas { context, size in
@@ -134,7 +108,7 @@ struct SpectrumCanvas: View {
             // Background
             context.fill(
                 Path(CGRect(origin: .zero, size: size)),
-                with: .color(Color(red: 0.04, green: 0.1, blue: 0.04))
+                with: .color(Color(red: 0.03, green: 0.06, blue: 0.10))
             )
 
             guard let scan = radio.scanData, !scan.rssi.isEmpty else { return }
@@ -148,7 +122,7 @@ struct SpectrumCanvas: View {
                 for (i, v) in scan.snr.enumerated() {
                     let h = (Double(v) / maxR) * (H - 20)
                     let rect = CGRect(x: Double(i) * barW, y: H - h, width: barW, height: h)
-                    context.fill(Path(rect), with: .color(Color(red: 0, green: 0.3, blue: 0.47).opacity(0.6)))
+                    context.fill(Path(rect), with: .color(Color(red: 0, green: 0.3, blue: 0.47).opacity(0.55)))
                 }
             }
 
@@ -156,7 +130,7 @@ struct SpectrumCanvas: View {
             for (i, v) in scan.rssi.enumerated() {
                 let h = (Double(v) / maxR) * (H - 20)
                 let t = h / (H - 20)
-                let color = Color(red: 0, green: 0.1 + 0.9 * t, blue: 0.1 * t)
+                let color = Color(hue: 0.5 - 0.35 * t, saturation: 0.85, brightness: 0.4 + 0.55 * t)
                 let rect = CGRect(x: Double(i) * barW + 0.5, y: H - h, width: max(1, barW - 1), height: h)
                 context.fill(Path(rect), with: .color(color))
             }
@@ -167,17 +141,20 @@ struct SpectrumCanvas: View {
                 guard i >= 0, i < Double(n) else { continue }
                 let x = (i + 0.5) * barW
 
-                // Dashed line
                 var linePath = Path()
                 linePath.move(to: CGPoint(x: x, y: 0))
                 linePath.addLine(to: CGPoint(x: x, y: H - 20))
-                context.stroke(linePath, with: .color(.cyan),
-                              style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                context.stroke(
+                    linePath,
+                    with: .color(.accent.opacity(0.8)),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                )
 
-                // Label
                 let label = String(format: "%.1f", Double(freq) / 100.0)
-                context.draw(Text(label).font(.system(size: 8, design: .monospaced)).foregroundColor(.cyan),
-                            at: CGPoint(x: x, y: 8))
+                context.draw(
+                    Text(label).font(.system(size: 9, design: .monospaced)).foregroundColor(.accent),
+                    at: CGPoint(x: x, y: 10)
+                )
             }
 
             // Current freq marker
@@ -194,17 +171,14 @@ struct SpectrumCanvas: View {
 
             // Axis labels
             context.draw(
-                Text("\(scan.startFreq) kHz").font(.system(size: 8, design: .monospaced)).foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.2)),
-                at: CGPoint(x: 30, y: H - 6)
+                Text("\(scan.startFreq) kHz").font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary),
+                at: CGPoint(x: 38, y: H - 8)
             )
             let endFreq = scan.startFreq + scan.step * (n - 1)
             context.draw(
-                Text("\(endFreq) kHz").font(.system(size: 8, design: .monospaced)).foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.2)),
-                at: CGPoint(x: W - 30, y: H - 6)
+                Text("\(endFreq) kHz").font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary),
+                at: CGPoint(x: W - 38, y: H - 8)
             )
-        }
-        .onTapGesture { _ in
-            // Tap-to-tune requires GeometryReader; implemented below via overlay
         }
     }
 }

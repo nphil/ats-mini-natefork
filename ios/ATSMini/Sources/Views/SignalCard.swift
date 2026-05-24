@@ -5,54 +5,60 @@ struct SignalCard: View {
 
     var body: some View {
         GlassCard {
-            VStack(spacing: 10) {
-                MeterRow(label: "RSSI", value: "\(radio.rssi) dBuV",
-                         fraction: Double(radio.rssi) / 127.0,
-                         gradient: [.cyan, .green])
+            VStack(spacing: 14) {
 
-                MeterRow(label: "SNR", value: "\(radio.snr) dB",
-                         fraction: Double(radio.snr) / 30.0,
-                         gradient: [.orange, .yellow])
+                CardHeader(title: "Signal")
 
-                MeterRow(label: "CPU 0", value: "\(radio.cpu0)%",
-                         fraction: Double(radio.cpu0) / 100.0,
-                         gradient: [.cyan, Color(red: 0, green: 1, blue: 0.8)])
+                VStack(spacing: 10) {
+                    MeterRow(label: "RSSI", value: "\(radio.rssi) dBuV",
+                             fraction: Double(radio.rssi) / 127.0,
+                             gradient: [.cyan, .green])
 
-                MeterRow(label: "CPU 1", value: "\(radio.cpu1)%",
-                         fraction: Double(radio.cpu1) / 100.0,
-                         gradient: [Color(red: 1, green: 0.4, blue: 0), .orange])
+                    MeterRow(label: "SNR", value: "\(radio.snr) dB",
+                             fraction: Double(radio.snr) / 30.0,
+                             gradient: [.orange, .yellow])
 
-                Divider()
+                    MeterRow(label: "CPU 0", value: "\(radio.cpu0)%",
+                             fraction: Double(radio.cpu0) / 100.0,
+                             gradient: [.cyan, Color(red: 0, green: 1, blue: 0.8)])
 
-                // Stats grid
-                HStack(spacing: 12) {
-                    StatBox(value: "\(radio.rssi)", label: "RSSI")
-                    StatBox(value: "\(radio.snr)", label: "SNR")
-                    StatBox(value: String(format: "%.2fV", radio.batteryVoltage), label: "Battery")
-                    StatBox(value: "\(radio.sequenceNumber)", label: "Seq")
+                    MeterRow(label: "CPU 1", value: "\(radio.cpu1)%",
+                             fraction: Double(radio.cpu1) / 100.0,
+                             gradient: [Color(red: 1, green: 0.4, blue: 0), .orange])
                 }
 
-                // Battery bar
-                VStack(alignment: .leading, spacing: 4) {
+                Divider().opacity(0.4)
+
+                // Battery
+                VStack(spacing: 6) {
                     HStack {
-                        Text("Battery")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        Label("Battery", systemImage: "battery.100")
+                            .font(.subheadline.weight(.medium))
                         Spacer()
-                        Text("\(Int(radio.batteryPercent))%")
-                            .font(.caption2)
+                        Text(String(format: "%.2f V · %d%%", radio.batteryVoltage, Int(radio.batteryPercent)))
+                            .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
+
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(.ultraThinMaterial)
-                            RoundedRectangle(cornerRadius: 4)
+                            Capsule()
+                                .fill(.tertiary)
+                                .opacity(0.3)
+                            Capsule()
                                 .fill(batteryColor)
                                 .frame(width: geo.size.width * radio.batteryPercent / 100)
+                                .animation(.smooth(duration: 0.3), value: radio.batteryPercent)
                         }
                     }
-                    .frame(height: 10)
+                    .frame(height: 8)
+                }
+
+                // Compact stat row
+                HStack(spacing: 10) {
+                    StatBox(value: "\(radio.rssi)", label: "RSSI")
+                    StatBox(value: "\(radio.snr)",  label: "SNR")
+                    StatBox(value: "\(radio.sequenceNumber)", label: "Seq")
                 }
             }
         }
@@ -73,24 +79,23 @@ struct MeterRow: View {
     let gradient: [Color]
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.caption2)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(value)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(.ultraThinMaterial)
-                    RoundedRectangle(cornerRadius: 4)
+                    Capsule().fill(.tertiary).opacity(0.3)
+                    Capsule()
                         .fill(LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing))
                         .frame(width: geo.size.width * min(1, max(0, fraction)))
-                        .animation(.easeOut(duration: 0.3), value: fraction)
+                        .animation(.smooth(duration: 0.3), value: fraction)
                 }
             }
             .frame(height: 8)
@@ -105,15 +110,16 @@ struct StatBox: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(.caption, design: .monospaced).bold())
-                .foregroundStyle(Color.accent)
+                .font(.title3.monospaced().weight(.semibold))
+                .foregroundStyle(.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(label)
-                .font(.system(size: 9))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
     }
 }

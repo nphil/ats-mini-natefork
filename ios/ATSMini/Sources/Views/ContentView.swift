@@ -22,10 +22,8 @@ struct ContentView: View {
                 SettingsTab()
             }
         }
-        .tint(Color.accent)
-        .onAppear {
-            ble.radio = radio
-        }
+        .tint(.accent)
+        .onAppear { ble.radio = radio }
     }
 }
 
@@ -36,21 +34,26 @@ struct RadioTab: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    ConnectionCard()
-                    FrequencyCard()
-                    if radio.isFM && (!radio.rdsStation.isEmpty || !radio.rdsPTY.isEmpty || !radio.rdsText.isEmpty) {
-                        RDSCard()
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ConnectionCard()
+                        FrequencyCard()
+                        if radio.isFM && (!radio.rdsStation.isEmpty || !radio.rdsPTY.isEmpty || !radio.rdsText.isEmpty) {
+                            RDSCard()
+                        }
+                        ControlsCard()
+                        SignalCard()
                     }
-                    ControlsCard()
-                    SignalCard()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .padding()
+                .scrollIndicators(.hidden)
+                .scrollContentBackground(.hidden)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("ATS-Mini")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 }
@@ -58,20 +61,23 @@ struct RadioTab: View {
 // MARK: - Spectrum Tab
 
 struct SpectrumTab: View {
-    @EnvironmentObject var radio: RadioState
-
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    SpectrumCard()
-                    PresetsCard()
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        SpectrumCard()
+                        PresetsCard()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .padding()
+                .scrollIndicators(.hidden)
+                .scrollContentBackground(.hidden)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Spectrum")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 }
@@ -81,15 +87,20 @@ struct SpectrumTab: View {
 struct WaterfallTab: View {
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    WaterfallCard()
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        WaterfallCard()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .padding()
+                .scrollIndicators(.hidden)
+                .scrollContentBackground(.hidden)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Waterfall")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 }
@@ -99,15 +110,14 @@ struct WaterfallTab: View {
 struct SettingsTab: View {
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    FirmwareUpdateCard()
-                }
-                .padding()
+            ZStack {
+                AppBackground()
+                FirmwareUpdateView()
+                    .scrollIndicators(.hidden)
+                    .scrollContentBackground(.hidden)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 }
@@ -117,10 +127,12 @@ struct SettingsTab: View {
 struct LogTab: View {
     var body: some View {
         NavigationStack {
-            LogCard()
-                .background(Color(.systemGroupedBackground))
-                .navigationTitle("Log")
-                .navigationBarTitleDisplayMode(.inline)
+            ZStack {
+                AppBackground()
+                LogCard()
+            }
+            .navigationTitle("Log")
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 }

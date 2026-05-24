@@ -1,22 +1,42 @@
 import SwiftUI
 
-/// A frosted-glass card container using material effects
+/// Native iOS 26 Liquid Glass card. Content is padded and wrapped in a rounded glass surface.
 struct GlassCard<Content: View>: View {
+    var padding: CGFloat = 16
+    var cornerRadius: CGFloat = 22
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(padding: CGFloat = 16, cornerRadius: CGFloat = 22, @ViewBuilder content: () -> Content) {
+        self.padding = padding
+        self.cornerRadius = cornerRadius
         self.content = content()
     }
 
     var body: some View {
         content
-            .padding(14)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+    }
+}
+
+/// Section header for card-internal subsections — small, tracked caption.
+struct CardHeader: View {
+    let title: String
+    var trailing: String? = nil
+
+    var body: some View {
+        HStack {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let trailing {
+                Text(trailing)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

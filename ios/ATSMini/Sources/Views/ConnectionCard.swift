@@ -6,28 +6,41 @@ struct ConnectionCard: View {
     @State private var showDevicePicker = false
 
     var body: some View {
-        GlassCard {
-            HStack {
-                Circle()
-                    .fill(radio.isConnected ? Color.green : Color.gray)
-                    .frame(width: 8, height: 8)
-                Text(radio.connectionStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if radio.isConnected {
-                    Button("Disconnect") {
-                        ble.disconnect()
+        GlassCard(padding: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(radio.isConnected ? Color.green : Color.gray)
+                        .frame(width: 10, height: 10)
+                    if radio.isConnected {
+                        Circle()
+                            .stroke(Color.green.opacity(0.4), lineWidth: 4)
+                            .frame(width: 18, height: 18)
                     }
-                    .font(.caption)
-                    .buttonStyle(.glass)
-                    .tint(.red)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(radio.isConnected ? "Connected" : "Not Connected")
+                        .font(.subheadline.weight(.medium))
+                    Text(radio.connectionStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if radio.isConnected {
+                    Button("Disconnect", role: .destructive) { ble.disconnect() }
+                        .buttonStyle(.glass)
+                        .controlSize(.regular)
                 } else {
-                    Button("Connect") {
+                    Button {
                         showDevicePicker = true
                         ble.startScan()
+                    } label: {
+                        Label("Connect", systemImage: "antenna.radiowaves.left.and.right")
+                            .labelStyle(.titleAndIcon)
                     }
-                    .font(.caption.bold())
                     .buttonStyle(.glassProminent)
                     .tint(.accent)
                 }
@@ -42,36 +55,42 @@ struct ConnectionCard: View {
 struct DevicePickerSheet: View {
     @Binding var isPresented: Bool
     @ObservedObject private var ble = BLEManager.shared
-    @EnvironmentObject var radio: RadioState
 
     var body: some View {
         NavigationStack {
             List {
-                if ble.isScanning {
-                    HStack {
-                        ProgressView()
-                            .padding(.trailing, 8)
-                        Text("Scanning for devices...")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                ForEach(ble.discoveredDevices, id: \.identifier) { device in
-                    Button {
-                        ble.connect(to: device)
-                        isPresented = false
-                    } label: {
-                        HStack {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .foregroundStyle(Color.accent)
-                            Text(device.name ?? device.identifier.uuidString)
-                                .foregroundStyle(.primary)
+                Section {
+                    if ble.isScanning {
+                        HStack(spacing: 12) {
+                            ProgressView().controlSize(.small)
+                            Text("Scanning for devices…")
+                                .foregroundStyle(.secondary)
                         }
                     }
-                }
-                if ble.discoveredDevices.isEmpty && !ble.isScanning {
-                    Text("No devices found. Make sure your ATS-Mini has BLE enabled.")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
+                    ForEach(ble.discoveredDevices, id: \.identifier) { device in
+                        Button {
+                            ble.connect(to: device)
+                            isPresented = false
+                        } label: {
+                            HStack {
+                                Image(systemName: "antenna.radiowaves.left.and.right")
+                                    .foregroundStyle(.accent)
+                                Text(device.name ?? device.identifier.uuidString)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    if ble.discoveredDevices.isEmpty && !ble.isScanning {
+                        Text("No devices found. Make sure your ATS-Mini has BLE enabled.")
+                            .foregroundStyle(.secondary)
+                            .font(.callout)
+                    }
+                } header: {
+                    Text("Available Devices")
                 }
             }
             .navigationTitle("Select Device")
@@ -89,6 +108,6 @@ struct DevicePickerSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }

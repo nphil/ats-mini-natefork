@@ -106,7 +106,6 @@ final class OTAManager: NSObject, ObservableObject, URLSessionTaskDelegate {
         }.resume()
     }
 
-    // URLSessionTaskDelegate — upload progress
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     didSendBodyData bytesSent: Int64,
                     totalBytesSent: Int64,
@@ -117,7 +116,6 @@ final class OTAManager: NSObject, ObservableObject, URLSessionTaskDelegate {
 
     private func scheduleReconnect(ble: BLEManager) {
         let name = ble.connectedPeripheralName
-        // Device reboots in ~0.5 s, BLE stack comes back up in ~5–7 s
         DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
             self.statusMessage = "Scanning for device…"
             ble.autoConnectName = name
@@ -138,13 +136,16 @@ private extension String {
     var utf8Data: Data { Data(utf8) }
 }
 
-// MARK: - Firmware Update Card
+// MARK: - Settings / Firmware Update View
 
-struct FirmwareUpdateCard: View {
+struct FirmwareUpdateView: View {
     @StateObject private var ota = OTAManager()
-    @StateObject private var ble = BLEManager.shared
 
-    enum Source: String, CaseIterable { case file = "File", url = "URL" }
+    enum Source: String, CaseIterable, Identifiable {
+        case file = "Local File"
+        case url  = "Web URL"
+        var id: String { rawValue }
+    }
 
     @State private var source: Source = .file
     @State private var host = "atsmini.local"
@@ -152,155 +153,146 @@ struct FirmwareUpdateCard: View {
     @State private var showFilePicker = false
 
     var body: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 14) {
-
-                Label("Firmware Update", systemImage: "arrow.down.circle")
-                    .font(.headline)
-
-                // Device address
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Device address").font(.caption).foregroundStyle(.secondary)
+        Form {
+            Section {
+                LabeledContent("Device") {
                     TextField("atsmini.local or IP", text: $host)
+                        .multilineTextAlignment(.trailing)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
                 }
+            } header: {
+                Text("Connection")
+            } footer: {
+                Text("Phone must be on the same Wi-Fi network as the device (or connected to the device's AP).")
+            }
 
-                // Source picker
-                Picker("Source", selection: $source) {
-                    ForEach(Source.allCases, id: \.self) { Text($0.rawValue) }
+            Section("Source") {
+                Picker("Update from", selection: $source) {
+                    ForEach(Source.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .disabled(ota.phase.isActive)
 
-                // URL input
                 if source == .url {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Firmware URL").font(.caption).foregroundStyle(.secondary)
+                    LabeledContent("URL") {
                         TextField("https://…/firmware.bin", text: $firmwareURL)
+                            .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.URL)
                     }
                 }
+            }
 
-                // Progress area
+            Section {
+                if source == .file {
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label("Choose .bin file…", systemImage: "folder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.accent)
+                    .disabled(ota.phase.isActive)
+                } else {
+                    Button {
+                        ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
+                    } label: {
+                        Label("Flash from URL", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.accent)
+                    .disabled(ota.phase.isActive || firmwareURL.isEmpty)
+                }
+
                 if ota.phase != .idle {
-                    VStack(alignment: .leading, spacing: 6) {
+                    Button("Reset", role: .cancel) { ota.reset() }
+                        .frame(maxWidth: .infinity)
+                        .disabled(ota.phase.isActive)
+                }
+            }
+
+            if ota.phase != .idle {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text(ota.statusMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            statusIcon
+                            Text(ota.statusMessage.isEmpty ? statusLabel : ota.statusMessage)
+                                .font(.callout)
+                                .foregroundStyle(statusColor)
                             Spacer()
                             if ota.phase.isActive {
                                 Text("\(Int(ota.progress * 100))%")
-                                    .font(.caption.monospacedDigit())
+                                    .font(.callout.monospacedDigit().weight(.medium))
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        ProgressView(value: ota.phase == .done ? 1.0 : ota.progress)
-                            .tint(ota.phase == .done ? .green : .accent)
-                            .animation(.easeInOut, value: ota.progress)
+                        ProgressView(value: progressValue)
+                            .progressViewStyle(.linear)
+                            .tint(progressTint)
+                            .animation(.smooth(duration: 0.25), value: ota.progress)
                     }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Progress")
                 }
-
-                // Status badges
-                if case .error(let msg) = ota.phase {
-                    Label(msg, systemImage: "xmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                if ota.phase == .done {
-                    Label("Update complete — device restarting", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-
-                // Action buttons
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) {
-                        if source == .file {
-                            Button {
-                                showFilePicker = true
-                            } label: {
-                                Label("Choose .bin…", systemImage: "folder")
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled(ota.phase.isActive)
-                        } else {
-                            Button {
-                                ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
-                            } label: {
-                                Label("Flash from URL", systemImage: "arrow.down.circle")
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled(ota.phase.isActive || firmwareURL.isEmpty)
-                        }
-
-                        if ota.phase != .idle {
-                            Button("Reset", role: .cancel) { ota.reset() }
-                                .buttonStyle(.glass)
-                                .disabled(ota.phase.isActive)
-                        }
-                    }
-
-                    VStack(spacing: 8) {
-                        if source == .file {
-                            Button {
-                                showFilePicker = true
-                            } label: {
-                                Label("Choose .bin…", systemImage: "folder")
-                                    .frame(maxWidth: .infinity)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled(ota.phase.isActive)
-                        } else {
-                            Button {
-                                ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
-                            } label: {
-                                Label("Flash from URL", systemImage: "arrow.down.circle")
-                                    .frame(maxWidth: .infinity)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled(ota.phase.isActive || firmwareURL.isEmpty)
-                        }
-
-                        if ota.phase != .idle {
-                            Button("Reset", role: .cancel) { ota.reset() }
-                                .frame(maxWidth: .infinity)
-                                .buttonStyle(.glass)
-                                .disabled(ota.phase.isActive)
-                        }
-                    }
-                }
-
-                Text("Phone must be on the same WiFi network as the device (or connected to the device's AP).")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
         }
+        .formStyle(.grouped)
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [UTType.data],
             allowsMultipleSelection: false
         ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    ota.flashFromFile(url, host: host, ble: BLEManager.shared)
-                }
-            case .failure(let error):
-                // surface picker errors as OTA error state via a brief workaround
-                _ = error
+            if case .success(let urls) = result, let url = urls.first {
+                ota.flashFromFile(url, host: host, ble: BLEManager.shared)
             }
+        }
+    }
+
+    // MARK: - Status helpers
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch ota.phase {
+        case .downloading: Image(systemName: "arrow.down.circle").foregroundStyle(statusColor)
+        case .uploading:   Image(systemName: "arrow.up.circle").foregroundStyle(statusColor)
+        case .done:        Image(systemName: "checkmark.circle.fill").foregroundStyle(statusColor)
+        case .error:       Image(systemName: "xmark.circle.fill").foregroundStyle(statusColor)
+        case .idle:        Image(systemName: "circle").foregroundStyle(statusColor)
+        }
+    }
+
+    private var statusLabel: String {
+        switch ota.phase {
+        case .downloading: return "Downloading…"
+        case .uploading:   return "Uploading…"
+        case .done:        return "Update complete — device restarting"
+        case .error(let m): return m
+        case .idle:        return ""
+        }
+    }
+
+    private var statusColor: Color {
+        switch ota.phase {
+        case .done:  return .green
+        case .error: return .red
+        default:     return .secondary
+        }
+    }
+
+    private var progressValue: Double {
+        ota.phase == .done ? 1.0 : ota.progress
+    }
+
+    private var progressTint: Color {
+        switch ota.phase {
+        case .done:  return .green
+        case .error: return .red
+        default:     return .accent
         }
     }
 }

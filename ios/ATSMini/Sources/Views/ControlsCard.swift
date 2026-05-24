@@ -6,70 +6,48 @@ struct ControlsCard: View {
 
     var body: some View {
         GlassCard {
-            VStack(spacing: 10) {
-                DeltaRow(label: "Band", value: radio.bandName) { ble.sendDelta("band", delta: $0) }
-                DeltaRow(label: "Mode", value: radio.modeName) { ble.sendDelta("mode", delta: $0) }
-                DeltaRow(label: "Step", value: radio.stepSize) { ble.sendDelta("step", delta: $0) }
-                DeltaRow(label: "BW", value: radio.bandwidth) { ble.sendDelta("bw", delta: $0) }
-                DeltaRow(label: "AGC", value: radio.agc) { ble.sendDelta("agc", delta: $0) }
+            VStack(spacing: 14) {
 
-                Divider()
+                CardHeader(title: "Controls")
 
-                // Volume
+                VStack(spacing: 10) {
+                    DeltaRow(label: "Band",  value: radio.bandName)  { ble.sendDelta("band", delta: $0) }
+                    DeltaRow(label: "Mode",  value: radio.modeName)  { ble.sendDelta("mode", delta: $0) }
+                    DeltaRow(label: "Step",  value: radio.stepSize)  { ble.sendDelta("step", delta: $0) }
+                    DeltaRow(label: "BW",    value: radio.bandwidth) { ble.sendDelta("bw",   delta: $0) }
+                    DeltaRow(label: "AGC",   value: radio.agc)       { ble.sendDelta("agc",  delta: $0) }
+                }
+
+                Divider().opacity(0.4)
+
                 VolumeRow()
 
-                Divider()
+                Divider().opacity(0.4)
 
-                // Action buttons
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
+                // Action row — full-width primaries
+                GlassEffectContainer {
+                    HStack(spacing: 10) {
                         Button {
                             ble.sendClick()
                         } label: {
-                            Label("Encoder Click", systemImage: "button.programmable")
-                                .font(.caption)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                            Label("Click", systemImage: "button.programmable")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
                         }
                         .buttonStyle(.glass)
                         .tint(.accent)
+                        .disabled(!radio.isConnected)
 
                         Button {
                             ble.sendSleep(true)
                         } label: {
                             Label("Sleep", systemImage: "moon.fill")
-                                .font(.caption)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
                         }
                         .buttonStyle(.glassProminent)
-                        .tint(.red)
-                    }
-
-                    VStack(spacing: 8) {
-                        Button {
-                            ble.sendClick()
-                        } label: {
-                            Label("Encoder Click", systemImage: "button.programmable")
-                                .font(.caption)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glass)
-                        .tint(.accent)
-
-                        Button {
-                            ble.sendSleep(true)
-                        } label: {
-                            Label("Sleep", systemImage: "moon.fill")
-                                .font(.caption)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
-                        .tint(.red)
+                        .tint(.indigo)
+                        .disabled(!radio.isConnected)
                     }
                 }
             }
@@ -77,6 +55,7 @@ struct ControlsCard: View {
     }
 }
 
+/// Label + decrement/value/increment row. Symmetric, never squeezed.
 struct DeltaRow: View {
     let label: String
     let value: String
@@ -84,38 +63,38 @@ struct DeltaRow: View {
     @EnvironmentObject var radio: RadioState
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text(label)
-                .font(.caption)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(width: 50, alignment: .leading)
-            Button { action(-1) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.caption)
-                    .frame(minWidth: 32, minHeight: 28)
-            }
-            .buttonStyle(.glass)
-            .disabled(!radio.isConnected)
+                .frame(width: 58, alignment: .leading)
 
-            Text(value)
-                .font(.system(.caption, design: .monospaced))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(minWidth: 80)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+            GlassEffectContainer {
+                HStack(spacing: 4) {
+                    Button { action(-1) } label: {
+                        Image(systemName: "minus")
+                            .font(.callout.weight(.semibold))
+                            .frame(width: 36, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(!radio.isConnected)
 
-            Button { action(1) } label: {
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .frame(minWidth: 32, minHeight: 28)
+                    Text(value)
+                        .font(.callout.monospaced().weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+
+                    Button { action(1) } label: {
+                        Image(systemName: "plus")
+                            .font(.callout.weight(.semibold))
+                            .frame(width: 36, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(!radio.isConnected)
+                }
             }
-            .buttonStyle(.glass)
-            .disabled(!radio.isConnected)
         }
     }
 }
@@ -127,10 +106,12 @@ struct VolumeRow: View {
     @State private var isDragging = false
 
     var body: some View {
-        HStack {
-            Image(systemName: "speaker.fill")
-                .font(.caption)
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.wave.1.fill")
+                .font(.callout)
                 .foregroundStyle(.secondary)
+                .frame(width: 24)
+
             Slider(value: $localVolume, in: 0...100, step: 1) { editing in
                 if !editing && isDragging {
                     isDragging = false
@@ -145,9 +126,15 @@ struct VolumeRow: View {
                 }
             }
             .tint(.accent)
+
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
             Text("\(Int(localVolume))")
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 30)
+                .font(.callout.monospaced().weight(.medium))
+                .frame(width: 32, alignment: .trailing)
         }
         .onChange(of: radio.volume) { _, newVal in
             if !isDragging { localVolume = Double(newVal) }
