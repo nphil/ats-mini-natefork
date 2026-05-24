@@ -88,9 +88,8 @@ jobs:
           
           if [ "$TAG_NAME" = "latest" ]; then
             # Only upload if the 'latest' release already exists (created by the firmware workflow)
-            RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/latest" --jq '.id' 2>/dev/null || echo "")
-            if [ -n "$RELEASE_ID" ]; then
-              gh release upload latest ATSMini.ipa --clobber
+            if gh release view latest --repo "${{ github.repository }}" &>/dev/null; then
+              gh release upload latest ATSMini.ipa --clobber --repo "${{ github.repository }}"
             else
               echo "No 'latest' release found — skipping upload. IPA is available as a build artifact."
             fi
