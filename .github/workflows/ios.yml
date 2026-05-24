@@ -114,7 +114,9 @@ jobs:
             fi
           elif [ "$KIND" = "ios" ]; then
             # iOS-only versioned release — create new
-            NOTES=$(printf 'Unsigned IPA — sideload with AltStore / SideStore.\n\nBuilt from `%s` on %s\n' "$SHORT_SHA" "$BUILD_DATE")
+            NOTES="Unsigned IPA — sideload with AltStore / SideStore.
+
+          Built from ${SHORT_SHA} on ${BUILD_DATE}"
             gh release create "$TAG_NAME" \
               --repo "$REPO" \
               --title "$TITLE" \
@@ -122,7 +124,7 @@ jobs:
             gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
           else
             # Firmware version tag — attach IPA to the existing firmware release
-            NOTES=$(printf 'Built from `%s` on %s\n' "$SHORT_SHA" "$BUILD_DATE")
+            NOTES="Built from ${SHORT_SHA} on ${BUILD_DATE}"
             gh release create "$TAG_NAME" \
               --repo "$REPO" \
               --title "$TITLE" \
