@@ -57,6 +57,9 @@ jobs:
               "size": size
           }
 
+          # Remove existing entries for this version to avoid duplicates
+          app['versions'] = [v for v in app['versions'] if v['version'] != version]
+
           # Newest version first
           app['versions'].insert(0, new_ver)
 
