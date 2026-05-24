@@ -17,20 +17,20 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "2.1.0",
+          "buildVersion": "2",
+          "date": "2026-05-24T16:12:27Z",
+          "localizedDescription": "Full iOS 26 Liquid Glass UI overhaul. Native .glassEffect() throughout, scroll bars hidden, Spectrum/Waterfall control layouts rebuilt (no more squeezed buttons), Settings moved to native Form with sections, firmware update with file picker / URL / progress / auto-reconnect.",
+          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/ios-v2.1.0/ATSMini.ipa",
+          "size": 416075
+        },
+        {
           "version": "2.0.1",
           "buildVersion": "2.0.1",
           "date": "2026-05-24T15:30:47Z",
           "localizedDescription": "Initial iOS release with optimized iOS 26 SwiftUI layout adjustments, featuring native glass button styles and ViewThatFits dynamic type wrapping.",
           "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/v2.0.1/ATSMini.ipa",
           "size": 396634
-        },
-        {
-          "version": "latest",
-          "buildVersion": "latest",
-          "date": "2026-05-24T11:15:00Z",
-          "localizedDescription": "Rolling release that automatically points to the latest build from the main branch.",
-          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/latest/ATSMini.ipa",
-          "size": 15000000
         }
       ]
     }
