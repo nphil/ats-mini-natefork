@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ['v*', 'ios-v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: "iOS version to release (e.g. 3.0.0). Leave blank for a rolling 'latest' build."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -67,16 +72,42 @@ jobs:
 
       - name: Determine release tag
         id: tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           REF="$GITHUB_REF"
-          if [[ "$REF" == refs/tags/ios-v* ]]; then
-            VER="${REF#refs/tags/ios-v}"
+          REPO="${{ github.repository }}"
+
+          emit_ios () {
+            local v="$1"
             {
-              echo "tag=ios-v${VER}"
+              echo "tag=ios-v${v}"
               echo "prerelease=false"
-              echo "title=ATS-Mini Remote ${VER}"
+              echo "title=ATS-Mini Remote ${v}"
               echo "kind=ios"
             } >> "$GITHUB_OUTPUT"
+          }
+
+          emit_rolling () {
+            {
+              echo "tag=latest"
+              echo "prerelease=true"
+              echo "title=Latest build"
+              echo "kind=rolling"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          # 1. Manual workflow_dispatch with explicit version → versioned release
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            emit_ios "$INPUT_VERSION"
+
+          # 2. iOS tag push → versioned release
+          elif [[ "$REF" == refs/tags/ios-v* ]]; then
+            VER="${REF#refs/tags/ios-v}"
+            emit_ios "$VER"
+
+          # 3. Firmware tag push → attach IPA to firmware release
           elif [[ "$REF" == refs/tags/v* ]]; then
             VER="${REF#refs/tags/}"
             {
@@ -85,13 +116,23 @@ jobs:
               echo "title=${VER}"
               echo "kind=firmware"
             } >> "$GITHUB_OUTPUT"
+
+          # 4. Main branch push → auto-release if project.yml has a new version
+          elif [[ "$REF" == refs/heads/main ]]; then
+            PROJECT_VER=$(grep -E '^\s+MARKETING_VERSION:' ios/project.yml \
+              | head -1 | awk '{print $2}' | tr -d '"')
+            if [ -n "$PROJECT_VER" ] \
+              && ! gh release view "ios-v${PROJECT_VER}" --repo "$REPO" >/dev/null 2>&1; then
+              echo "Detected new iOS version in project.yml: ${PROJECT_VER}"
+              emit_ios "$PROJECT_VER"
+            else
+              echo "iOS version ${PROJECT_VER:-unknown} already released; producing rolling build"
+              emit_rolling
+            fi
+
+          # 5. Anything else (manual dispatch with no version) → rolling
           else
-            {
-              echo "tag=latest"
-              echo "prerelease=true"
-              echo "title=Latest build"
-              echo "kind=rolling"
-            } >> "$GITHUB_OUTPUT"
+            emit_rolling
           fi
 
       - name: Publish release
@@ -131,9 +172,13 @@ jobs:
               echo "No 'latest' release found — skipping upload. IPA is available as a build artifact."
             fi
           else
-            # Versioned release (iOS or firmware) — create if missing, then upload
+            # Versioned release (iOS or firmware) — create release at current SHA
+            # if it doesn't exist, then upload the IPA. --target ensures the tag
+            # is created from this commit when no tag was pushed (e.g. main-push
+            # auto-release or workflow_dispatch with a version input).
             gh release create "$TAG_NAME" \
               --repo "$REPO" \
+              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes "$NOTES" || true
             gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
