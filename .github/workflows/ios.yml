@@ -104,6 +104,24 @@ jobs:
           KIND="${{ steps.tag.outputs.kind }}"
           REPO="${{ github.repository }}"
           BUILD_DATE="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          FOOTER="Built from ${SHORT_SHA} on ${BUILD_DATE}"
+
+          # Compose release notes. Prefer ios/RELEASE_NOTES.md when present so that
+          # a major refresh can ship rich, user-facing notes (also surfaced as
+          # localizedDescription in apps.json by the Feather update workflow).
+          NOTES_FILE="ios/RELEASE_NOTES.md"
+          if [ "$KIND" = "ios" ] && [ -f "$NOTES_FILE" ]; then
+            NOTES="$(cat "$NOTES_FILE")
+
+          ---
+          ${FOOTER}"
+          elif [ "$KIND" = "ios" ]; then
+            NOTES="Unsigned IPA — sideload with AltStore / SideStore / Feather.
+
+          ${FOOTER}"
+          else
+            NOTES="${FOOTER}"
+          fi
 
           if [ "$KIND" = "rolling" ]; then
             # Only attach to 'latest' if it already exists (created by firmware workflow)
@@ -112,19 +130,8 @@ jobs:
             else
               echo "No 'latest' release found — skipping upload. IPA is available as a build artifact."
             fi
-          elif [ "$KIND" = "ios" ]; then
-            # iOS-only versioned release — create new
-            NOTES="Unsigned IPA — sideload with AltStore / SideStore.
-
-          Built from ${SHORT_SHA} on ${BUILD_DATE}"
-            gh release create "$TAG_NAME" \
-              --repo "$REPO" \
-              --title "$TITLE" \
-              --notes "$NOTES" || true
-            gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
           else
-            # Firmware version tag — attach IPA to the existing firmware release
-            NOTES="Built from ${SHORT_SHA} on ${BUILD_DATE}"
+            # Versioned release (iOS or firmware) — create if missing, then upload
             gh release create "$TAG_NAME" \
               --repo "$REPO" \
               --title "$TITLE" \
