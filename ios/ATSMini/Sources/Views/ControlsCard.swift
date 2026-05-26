@@ -24,10 +24,10 @@ struct ControlsCard: View {
 
                 Divider().opacity(0.4)
 
-                // Action row — full-width primaries
                 GlassEffectContainer {
                     HStack(spacing: 10) {
                         Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             ble.sendClick()
                         } label: {
                             Label("Click", systemImage: "button.programmable")
@@ -39,6 +39,7 @@ struct ControlsCard: View {
                         .disabled(!radio.isConnected)
 
                         Button {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                             ble.sendSleep(true)
                         } label: {
                             Label("Sleep", systemImage: "moon.fill")
@@ -55,12 +56,15 @@ struct ControlsCard: View {
     }
 }
 
-/// Label + decrement/value/increment row. Symmetric, never squeezed.
+// MARK: - Delta Row
+
 struct DeltaRow: View {
     let label: String
     let value: String
     let action: (Int) -> Void
     @EnvironmentObject var radio: RadioState
+
+    private let lightImpact = UIImpactFeedbackGenerator(style: .light)
 
     var body: some View {
         HStack(spacing: 10) {
@@ -71,7 +75,10 @@ struct DeltaRow: View {
 
             GlassEffectContainer {
                 HStack(spacing: 4) {
-                    Button { action(-1) } label: {
+                    Button {
+                        lightImpact.impactOccurred()
+                        action(-1)
+                    } label: {
                         Image(systemName: "minus")
                             .font(.callout.weight(.semibold))
                             .frame(width: 36, height: 32)
@@ -86,7 +93,10 @@ struct DeltaRow: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 32)
 
-                    Button { action(1) } label: {
+                    Button {
+                        lightImpact.impactOccurred()
+                        action(1)
+                    } label: {
                         Image(systemName: "plus")
                             .font(.callout.weight(.semibold))
                             .frame(width: 36, height: 32)
@@ -99,6 +109,8 @@ struct DeltaRow: View {
     }
 }
 
+// MARK: - Volume Row
+
 struct VolumeRow: View {
     @EnvironmentObject var radio: RadioState
     @ObservedObject private var ble = BLEManager.shared
@@ -107,7 +119,7 @@ struct VolumeRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "speaker.wave.1.fill")
+            Image(systemName: "speaker.fill")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
@@ -117,6 +129,7 @@ struct VolumeRow: View {
                     isDragging = false
                     let delta = Int(localVolume) - radio.volume
                     if delta != 0 {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         for _ in 0..<abs(delta) {
                             ble.sendVolumeDelta(delta > 0 ? 1 : -1)
                         }

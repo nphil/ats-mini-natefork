@@ -7,6 +7,8 @@ struct FrequencyCard: View {
     @State private var showQuickTune = false
     @FocusState private var quickTuneFocused: Bool
 
+    private let impact = UIImpactFeedbackGenerator(style: .medium)
+
     var body: some View {
         GlassCard {
             VStack(spacing: 16) {
@@ -21,6 +23,7 @@ struct FrequencyCard: View {
                         .foregroundStyle(.primary)
                         .contentTransition(.numericText())
                         .onTapGesture {
+                            impact.impactOccurred()
                             showQuickTune.toggle()
                             if showQuickTune { quickTuneFocused = true }
                         }
@@ -36,10 +39,13 @@ struct FrequencyCard: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // Controls — well-spaced glass buttons
+                // Seek controls
                 GlassEffectContainer {
                     HStack(spacing: 8) {
-                        Button { ble.sendSeek(-1) } label: {
+                        Button {
+                            impact.impactOccurred()
+                            ble.sendSeek(-1)
+                        } label: {
                             Image(systemName: "backward.end.fill")
                                 .font(.title3)
                                 .frame(width: 48, height: 44)
@@ -48,7 +54,10 @@ struct FrequencyCard: View {
                         .tint(.accent)
                         .disabled(!radio.isConnected || radio.isSeeking)
 
-                        Button { ble.sendRaw("r") } label: {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            ble.sendRaw("r")
+                        } label: {
                             Image(systemName: "chevron.left")
                                 .font(.title3)
                                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -56,7 +65,10 @@ struct FrequencyCard: View {
                         .buttonStyle(.glass)
                         .disabled(!radio.isConnected)
 
-                        Button { ble.sendRaw("R") } label: {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            ble.sendRaw("R")
+                        } label: {
                             Image(systemName: "chevron.right")
                                 .font(.title3)
                                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -64,7 +76,10 @@ struct FrequencyCard: View {
                         .buttonStyle(.glass)
                         .disabled(!radio.isConnected)
 
-                        Button { ble.sendSeek(1) } label: {
+                        Button {
+                            impact.impactOccurred()
+                            ble.sendSeek(1)
+                        } label: {
                             Image(systemName: "forward.end.fill")
                                 .font(.title3)
                                 .frame(width: 48, height: 44)
@@ -84,7 +99,7 @@ struct FrequencyCard: View {
                     }
                 }
 
-                // Mode chips — flexible layout, no cramming
+                // Mode info chips
                 FlowLayout(spacing: 8) {
                     InfoChip(label: "Band", value: radio.bandName)
                     InfoChip(label: "Mode", value: radio.modeName)
@@ -105,16 +120,30 @@ struct FrequencyCard: View {
                             .focused($quickTuneFocused)
                             .onSubmit { commitQuickTune() }
 
-                        Button("Tune") { commitQuickTune() }
-                            .buttonStyle(.glassProminent)
-                            .tint(.accent)
-                            .disabled(quickTuneText.isEmpty)
+                        Button("Tune") {
+                            impact.impactOccurred()
+                            commitQuickTune()
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(.accent)
+                        .disabled(quickTuneText.isEmpty)
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
+
+                // RDS inline (FM only, when data available)
+                if radio.isFM && hasRDS {
+                    Divider().opacity(0.4)
+                    RDSInline()
+                }
             }
             .animation(.smooth(duration: 0.25), value: showQuickTune)
+            .animation(.smooth(duration: 0.3), value: hasRDS)
         }
+    }
+
+    private var hasRDS: Bool {
+        !radio.rdsStation.isEmpty || !radio.rdsPTY.isEmpty || !radio.rdsText.isEmpty
     }
 
     private func commitQuickTune() {
@@ -141,7 +170,56 @@ struct FrequencyCard: View {
     }
 }
 
-/// Small label + value chip, used in the frequency card mode row.
+// MARK: - RDS Inline (shown inside FrequencyCard)
+
+private struct RDSInline: View {
+    @EnvironmentObject var radio: RadioState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("RDS")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                if !radio.rdsTime.isEmpty {
+                    Text(radio.rdsTime)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if !radio.rdsStation.isEmpty {
+                    Text(radio.rdsStation)
+                        .font(.title3.monospaced().weight(.semibold))
+                        .foregroundStyle(.accent)
+                }
+                if !radio.rdsPTY.isEmpty {
+                    Text(radio.rdsPTY)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .glassEffect(.regular, in: .capsule)
+                }
+            }
+
+            if !radio.rdsText.isEmpty {
+                Text(radio.rdsText)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Info Chip
+
 struct InfoChip: View {
     let label: String
     let value: String
@@ -161,7 +239,8 @@ struct InfoChip: View {
     }
 }
 
-/// Simple flow layout — wraps children to next line when row is full.
+// MARK: - Flow Layout
+
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 

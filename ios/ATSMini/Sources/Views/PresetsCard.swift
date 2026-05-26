@@ -13,16 +13,17 @@ struct PresetsCard: View {
             VStack(alignment: .leading, spacing: 12) {
 
                 HStack {
-                    Text("Presets".uppercased())
+                    Text("Presets")
                         .font(.caption2.weight(.semibold))
                         .tracking(1.2)
                         .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
                     Spacer()
                     Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         ble.sendListPresets()
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .font(.callout)
                     }
                     .buttonStyle(.glass)
                     .controlSize(.small)
@@ -39,6 +40,7 @@ struct PresetsCard: View {
                         .focused($nameFocused)
 
                     Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         let name = presetName.isEmpty ? "Preset" : presetName
                         ble.sendSavePreset(name: String(name.prefix(19)))
                         presetName = ""
@@ -52,10 +54,15 @@ struct PresetsCard: View {
                 }
 
                 if radio.presets.isEmpty {
-                    Text("No presets saved. Run a scan and tap Save to store the channel list.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 8)
+                    HStack(spacing: 10) {
+                        Image(systemName: "tray")
+                            .font(.title3)
+                            .foregroundStyle(.tertiary)
+                        Text("No presets yet — run a scan then tap Save.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
                 } else {
                     VStack(spacing: 8) {
                         ForEach(radio.presets) { preset in
@@ -74,8 +81,14 @@ struct PresetsCard: View {
                                     }
                                     editingPresetIdx = nil
                                 },
-                                onLoad: { ble.sendLoadPreset(idx: preset.idx) },
-                                onDelete: { ble.sendDeletePreset(idx: preset.idx) }
+                                onLoad: {
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    ble.sendLoadPreset(idx: preset.idx)
+                                },
+                                onDelete: {
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    ble.sendDeletePreset(idx: preset.idx)
+                                }
                             )
                         }
                     }
@@ -96,7 +109,7 @@ private struct PresetRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 if isEditing {
                     TextField("Name", text: $editingName)
                         .font(.callout.monospaced())
