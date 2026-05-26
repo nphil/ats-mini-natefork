@@ -14,20 +14,20 @@ struct WaterfallCard: View {
                     title: "Waterfall",
                     trailing: radio.waterfallMeta.map { meta in
                         let endF = meta.startFreq + meta.step * (meta.pointCount - 1)
-                        return "n=\(meta.pointCount)  \(fmtFreq(meta.startFreq))–\(fmtFreq(endF))"
+                        return "\(fmtFreq(meta.startFreq)) – \(fmtFreq(endF))"
                     }
                 )
 
-                // Canvas first — give the data the space
                 WaterfallCanvas()
                     .frame(height: 220)
                     .clipShape(.rect(cornerRadius: 14))
 
-                // Start/Stop row
+                // Start / Stop + Zoom
                 GlassEffectContainer {
                     HStack(spacing: 10) {
                         if radio.isWaterfallActive {
                             Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 ble.sendWaterfallStop()
                             } label: {
                                 Label("Stop", systemImage: "stop.fill")
@@ -38,6 +38,7 @@ struct WaterfallCard: View {
                             .tint(.red)
                         } else {
                             Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 radio.waterfallRows.removeAll()
                                 ble.sendWaterfallStart()
                             } label: {
@@ -50,9 +51,10 @@ struct WaterfallCard: View {
                             .disabled(!radio.isConnected)
                         }
 
-                        // Zoom group
+                        // Zoom controls
                         HStack(spacing: 4) {
                             Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 if radio.waterfallZoom > 0 { radio.waterfallZoom -= 1 }
                             } label: {
                                 Image(systemName: "minus.magnifyingglass")
@@ -65,6 +67,7 @@ struct WaterfallCard: View {
                                 .frame(minWidth: 28)
 
                             Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 if radio.waterfallZoom < 5 { radio.waterfallZoom += 1 }
                             } label: {
                                 Image(systemName: "plus.magnifyingglass")
@@ -86,28 +89,35 @@ struct WaterfallCard: View {
 
                 Divider().opacity(0.4)
 
-                // Frequency range — proper labelled fields
+                // Frequency range
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Range".uppercased())
+                    Text("Range")
                         .font(.caption2.weight(.semibold))
                         .tracking(1.2)
                         .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
 
                     HStack(spacing: 8) {
-                        rangeField(placeholder: radio.isFM ? "87.5" : "530", text: $startFreqText, label: "Start")
-                        rangeField(placeholder: radio.isFM ? "108.0" : "1700", text: $endFreqText, label: "End")
+                        rangeField(placeholder: radio.isFM ? "87.5" : "530",
+                                   text: $startFreqText, label: "Start")
+                        rangeField(placeholder: radio.isFM ? "108.0" : "1700",
+                                   text: $endFreqText, label: "End")
                         Text(radio.isFM ? "MHz" : "kHz")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
 
                     HStack(spacing: 10) {
-                        Button("Apply") { applyRange() }
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.glassProminent)
-                            .tint(.accent)
+                        Button("Apply") {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            applyRange()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.glassProminent)
+                        .tint(.accent)
 
                         Button("Reset") {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             radio.waterfallRows.removeAll()
                             radio.waterfallMeta = nil
                             startFreqText = ""
@@ -162,7 +172,15 @@ struct WaterfallCanvas: View {
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
 
             let rows = radio.waterfallRows
-            guard !rows.isEmpty else { return }
+            guard !rows.isEmpty else {
+                context.draw(
+                    Text("No waterfall data")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.secondary),
+                    at: CGPoint(x: W / 2, y: H / 2)
+                )
+                return
+            }
 
             let maxRows = Int(H)
             let displayRows = rows.suffix(maxRows)

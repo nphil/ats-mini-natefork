@@ -13,17 +13,13 @@ struct SpectrumCard: View {
     ]
 
     private var selectedStepLabel: String {
-        if let opt = stepOptions.first(where: { $0.0 == selectedStep }) {
-            return "\(opt.1) · \(opt.2)"
-        }
-        return "Normal"
+        stepOptions.first(where: { $0.0 == selectedStep }).map { "\($0.1) · \($0.2)" } ?? "Normal"
     }
 
     var body: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 14) {
 
-                // Header
                 CardHeader(
                     title: "Spectrum",
                     trailing: radio.isScanning
@@ -36,11 +32,11 @@ struct SpectrumCard: View {
                         .tint(.accent)
                 }
 
-                // Step selector (own row, room to breathe)
                 LabeledContent("Step") {
                     Menu {
                         ForEach(stepOptions, id: \.0) { opt in
                             Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 selectedStep = opt.0
                             } label: {
                                 if opt.0 == selectedStep {
@@ -63,18 +59,18 @@ struct SpectrumCard: View {
                     .disabled(radio.isScanning)
                 }
 
-                // Canvas — give it height
                 SpectrumCanvas()
                     .frame(height: 200)
                     .clipShape(.rect(cornerRadius: 14))
 
-                // Action row — full-width primary, compact destructive
                 GlassEffectContainer {
                     HStack(spacing: 10) {
                         Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             ble.sendScan(step: selectedStep)
                         } label: {
-                            Label(radio.isScanning ? "Scanning…" : "Start Scan", systemImage: "play.fill")
+                            Label(radio.isScanning ? "Scanning…" : "Start Scan",
+                                  systemImage: radio.isScanning ? "waveform" : "play.fill")
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 4)
                         }
@@ -83,6 +79,7 @@ struct SpectrumCard: View {
                         .disabled(!radio.isConnected || radio.isScanning)
 
                         Button(role: .destructive) {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             radio.scanData = nil
                         } label: {
                             Image(systemName: "trash")
@@ -105,19 +102,26 @@ struct SpectrumCanvas: View {
             let W = size.width
             let H = size.height
 
-            // Background
             context.fill(
                 Path(CGRect(origin: .zero, size: size)),
                 with: .color(Color(red: 0.03, green: 0.06, blue: 0.10))
             )
 
-            guard let scan = radio.scanData, !scan.rssi.isEmpty else { return }
+            guard let scan = radio.scanData, !scan.rssi.isEmpty else {
+                // Empty state
+                context.draw(
+                    Text("No scan data")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.secondary),
+                    at: CGPoint(x: W / 2, y: H / 2)
+                )
+                return
+            }
 
             let n = scan.pointCount
             let maxR = Double(scan.rssi.max() ?? 1)
             let barW = W / Double(n)
 
-            // SNR bars (dim)
             if !scan.snr.isEmpty {
                 for (i, v) in scan.snr.enumerated() {
                     let h = (Double(v) / maxR) * (H - 20)
@@ -126,7 +130,6 @@ struct SpectrumCanvas: View {
                 }
             }
 
-            // RSSI bars
             for (i, v) in scan.rssi.enumerated() {
                 let h = (Double(v) / maxR) * (H - 20)
                 let t = h / (H - 20)
@@ -135,7 +138,6 @@ struct SpectrumCanvas: View {
                 context.fill(Path(rect), with: .color(color))
             }
 
-            // Channel markers
             for freq in scan.channels {
                 let i = Double(freq - scan.startFreq) / Double(scan.step)
                 guard i >= 0, i < Double(n) else { continue }
@@ -144,11 +146,8 @@ struct SpectrumCanvas: View {
                 var linePath = Path()
                 linePath.move(to: CGPoint(x: x, y: 0))
                 linePath.addLine(to: CGPoint(x: x, y: H - 20))
-                context.stroke(
-                    linePath,
-                    with: .color(.accent.opacity(0.8)),
-                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
-                )
+                context.stroke(linePath, with: .color(.accent.opacity(0.8)),
+                               style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
 
                 let label = String(format: "%.1f", Double(freq) / 100.0)
                 context.draw(
@@ -157,7 +156,6 @@ struct SpectrumCanvas: View {
                 )
             }
 
-            // Current freq marker
             if radio.frequency > 0 {
                 let i = Double(radio.frequency - scan.startFreq) / Double(scan.step)
                 if i >= 0, i < Double(n) {
@@ -169,14 +167,15 @@ struct SpectrumCanvas: View {
                 }
             }
 
-            // Axis labels
             context.draw(
-                Text("\(scan.startFreq) kHz").font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary),
+                Text("\(scan.startFreq) kHz")
+                    .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary),
                 at: CGPoint(x: 38, y: H - 8)
             )
             let endFreq = scan.startFreq + scan.step * (n - 1)
             context.draw(
-                Text("\(endFreq) kHz").font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary),
+                Text("\(endFreq) kHz")
+                    .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary),
                 at: CGPoint(x: W - 38, y: H - 8)
             )
         }
