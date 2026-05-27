@@ -59,7 +59,10 @@ jobs:
 
       - name: Select Xcode
         run: |
-          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          LATEST=$(find /Applications -maxdepth 1 -type d -name 'Xcode_*.app' 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LATEST" ]; then
+            LATEST="/Applications/Xcode.app"
+          fi
           echo "Using: $LATEST"
           sudo xcode-select -s "$LATEST"
           xcodebuild -version
@@ -70,36 +73,36 @@ jobs:
       - name: Generate Xcode project
         run: cd ios && xcodegen generate --spec project.yml
 
-      - name: Archive (unsigned)
+      - name: Build (unsigned)
         run: |
           set -o pipefail
-          xcodebuild archive \
-            -project      "ios/${{ env.PROJECT }}" \
-            -scheme       "${{ env.SCHEME }}" \
+          xcodebuild build \
+            -project ios/${{ env.PROJECT }} \
+            -scheme  "${{ env.SCHEME }}" \
             -configuration Release \
-            -destination  "generic/platform=iOS" \
-            -archivePath  "$RUNNER_TEMP/ATSMini.xcarchive" \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            SKIP_INSTALL=NO \
-            INSTALL_PATH="/Applications" \
-            | xcpretty || exit ${PIPESTATUS[0]}
+            PROVISIONING_PROFILE=""
 
       - name: Package IPA
         run: |
-          APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive" \
-            -name "*.app" ! -name "*.xctest" ! -path "*/SwiftSupport/*" \
-            2>/dev/null | head -1)
+          APP=$(find "$RUNNER_TEMP/DerivedData" -name "*.app" \
+            -not -path "*/Intermediates*" \
+            -not -path "*-Runner.app*" \
+            -maxdepth 8 | head -1)
           if [ -z "$APP" ]; then
-            echo "❌ .app not found in archive:"
-            find "$RUNNER_TEMP/ATSMini.xcarchive" -maxdepth 6 2>/dev/null || echo "(archive missing)"
+            echo "❌ .app not found. Listing derived data:"
+            find "$RUNNER_TEMP/DerivedData" -maxdepth 6 2>/dev/null || echo "(DerivedData missing entirely)"
             exit 1
           fi
-          echo "✅ Found: $APP"
-          mkdir -p Payload && cp -r "$APP" Payload/
+          echo "✅ Found app at: $APP"
+          mkdir -p Payload
+          cp -r "$APP" Payload/
           zip -r ATSMini.ipa Payload/
-          echo "IPA: $(du -sh ATSMini.ipa | cut -f1)"
+          echo "IPA size: $(du -sh ATSMini.ipa | cut -f1)"
 
       - name: Commit version bump, update apps.json, tag, and publish
         env:
