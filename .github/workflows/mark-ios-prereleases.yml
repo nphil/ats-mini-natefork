@@ -1,6 +1,6 @@
 name: Mark iOS releases as pre-releases
 
-# Runs on every push to main (idempotent -- skips releases already marked
+# Runs on every push to main (idempotent — skips releases already marked
 # pre-release).  Ensures firmware vX.YY always holds the "Latest" badge
 # on the Releases page by keeping all ios-v* releases as pre-releases.
 
@@ -41,4 +41,4 @@ jobs:
 
             PAGE=$((PAGE + 1))
           done
-          echo "Done."
+          echo "Done. Updated ${UPDATED} release(s)."
