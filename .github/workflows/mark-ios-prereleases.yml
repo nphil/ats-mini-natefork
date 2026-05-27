@@ -1,10 +1,12 @@
 name: Mark iOS releases as pre-releases
 
-# One-time migration: flip all existing ios-v* full releases to pre-releases
-# so that the firmware v*.** release reclaims the "Latest" badge on the
-# Releases page.  Run once manually from the Actions tab; safe to re-run.
+# Runs on every push to main (idempotent -- skips releases already marked
+# pre-release).  Ensures firmware vX.YY always holds the "Latest" badge
+# on the Releases page by keeping all ios-v* releases as pre-releases.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -39,4 +41,4 @@ jobs:
 
             PAGE=$((PAGE + 1))
           done
-          echo "Done. Updated ${UPDATED} release(s)."
+          echo "Done."
