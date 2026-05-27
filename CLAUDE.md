@@ -82,4 +82,12 @@ set them up proactively before shipping.
 
 ## Branches
 
-- Push all changes directly to `main`. No dev branch needed.
+- **ALWAYS push directly to `main`. No pull requests. No feature branches. No merging.**
+- Never leave commits on a session branch — always land on `main` immediately:
+  ```
+  git fetch origin main && git rebase origin/main && git push origin HEAD:main
+  ```
+- If the session environment creates a dev branch (e.g. `claude/<slug>`), push
+  to `main` anyway using `HEAD:main`. Do not wait for a PR or human merge step.
+- The pipeline is fully automatic — every push to `main` triggers CI, bumps
+  versions, and publishes releases. PRs and manual merges break this flow.
