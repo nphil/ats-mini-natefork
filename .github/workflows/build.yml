@@ -1,18 +1,18 @@
 name: Build Firmware
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - '**'   # every branch push produces a downloadable artifact
     paths:
       - 'ats-mini/**'
       - 'changelog/**'
       - 'CHANGELOG.md'
       - '.github/workflows/build.yml'
       - '.pre-commit-config.yaml'
-  push:
+  pull_request:
     branches:
-      - '**'   # every branch push produces a downloadable artifact
+      - main
     paths:
       - 'ats-mini/**'
       - 'changelog/**'
@@ -160,7 +160,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           SLUG: ${{ needs.build.outputs.slug }}
         run: >-
-          python -c 'import os,re; t=open(f"""artifact/ats-mini-{os.environ["SLUG"]}-ospi/CHANGELOG.md""").read(); r=re.search(f"""(^## {os.environ["SLUG"][1:].replace(".", "\\.")} .*?)(?=^## \\d|\\Z)""", t, re.MULTILINE | re.DOTALL); print(r.group(0) if r else "")' |
+          python -c 'import os,re; t=open(f"""artifact/ats-mini-{os.environ["SLUG"]}-ospi/CHANGELOG.md""").read(); r=re.search(f"""(^## {os.environ["SLUG"][1:].replace(".", "\\.") } .*?)(?=^## \\d|\\Z)""", t, re.MULTILINE | re.DOTALL); print(r.group(0) if r else "")' |
           gh release create "$SLUG" --repo '${{ github.repository }}' --notes-file -
       - name: Upload release artifacts
         env:
@@ -174,7 +174,10 @@ jobs:
   latest-release:
     # Overwrites the rolling "latest" release on every push to main so the
     # Releases page always has a ready-to-flash binary without tagging.
+    # continue-on-error: tag protection rules may block creating the 'latest'
+    # tag on some repo configurations; versioned releases are the real deliverable.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -211,14 +214,14 @@ jobs:
 
           # Extract the latest section from CHANGELOG.md (between first two ## headings)
           CHANGELOG_SECTION="$(python3 -c "
-          import re, sys
-          try:
-              t = open('CHANGELOG.md').read()
-              m = re.search(r'(^## .+?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
-              print(m.group(0).strip() if m else '')
-          except Exception as e:
-              print('')
-          ")"
+import re, sys
+try:
+    t = open('CHANGELOG.md').read()
+    m = re.search(r'(^## .+?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
+    print(m.group(0).strip() if m else '')
+except Exception as e:
+    print('')
+")"
 
           # Recent commits since last tag (capped at 20)
           LAST_TAG="$(git describe --tags --match 'v?.??' --abbrev=0 2>/dev/null || true)"
