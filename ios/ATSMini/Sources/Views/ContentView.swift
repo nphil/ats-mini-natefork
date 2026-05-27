@@ -16,12 +16,11 @@ struct ContentView: View {
                 SettingsTab()
             }
         }
-        .tint(.accent)
         .onAppear { ble.radio = radio }
     }
 }
 
-// MARK: - Radio Tab
+// MARK: - Radio Tab (single-screen, no scroll under normal conditions)
 
 struct RadioTab: View {
     @EnvironmentObject var radio: RadioState
@@ -32,19 +31,20 @@ struct RadioTab: View {
             ZStack {
                 AppBackground()
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         FrequencyCard()
                         ControlsCard()
                         SignalCard()
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
                 }
                 .scrollIndicators(.hidden)
                 .scrollContentBackground(.hidden)
             }
             .navigationTitle("ATS-Mini")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ConnectionStatusButton()
@@ -55,9 +55,15 @@ struct RadioTab: View {
                     } label: {
                         Image(systemName: "text.alignleft")
                             .symbolRenderingMode(.hierarchical)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                            .background {
+                                Circle()
+                                    .fill(.thinMaterial)
+                                    .overlay(Circle().stroke(.secondary.opacity(0.3), lineWidth: 1))
+                            }
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -82,12 +88,12 @@ struct VisualizeTab: View {
             ZStack {
                 AppBackground()
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 14) {
                         Picker("View", selection: $mode) {
                             ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 14)
                         .padding(.top, 4)
 
                         if mode == .spectrum {
@@ -97,15 +103,14 @@ struct VisualizeTab: View {
                             WaterfallCard()
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .padding(.top, 0)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
                 }
                 .scrollIndicators(.hidden)
                 .scrollContentBackground(.hidden)
             }
             .navigationTitle("Visualize")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -117,12 +122,12 @@ struct SettingsTab: View {
         NavigationStack {
             ZStack {
                 AppBackground()
-                FirmwareUpdateView()
+                SettingsView()
                     .scrollIndicators(.hidden)
                     .scrollContentBackground(.hidden)
             }
             .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

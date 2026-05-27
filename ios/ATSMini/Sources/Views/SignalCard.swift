@@ -1,73 +1,52 @@
 import SwiftUI
 
+/// Compact one-card signal/battery/CPU status. Designed to fit in ~110pt
+/// vertical without scrolling.
 struct SignalCard: View {
     @EnvironmentObject var radio: RadioState
 
     var body: some View {
-        GlassCard {
-            VStack(spacing: 14) {
-
-                CardHeader(title: "Signal & Status", trailing: "Seq \(radio.sequenceNumber)")
-
-                // Signal meters
-                VStack(spacing: 10) {
-                    MeterRow(label: "RSSI",  value: "\(radio.rssi) dBuV",
-                             fraction: Double(radio.rssi) / 127.0,
-                             gradient: [.cyan, .green])
-
-                    MeterRow(label: "SNR",   value: "\(radio.snr) dB",
-                             fraction: Double(radio.snr) / 30.0,
-                             gradient: [.orange, .yellow])
-                }
-
-                Divider().opacity(0.4)
-
-                // Battery row
-                BatteryRow()
-
-                Divider().opacity(0.4)
-
-                // CPU compact row
+        GlassCard(padding: 12) {
+            VStack(spacing: 10) {
+                // Top: RSSI / SNR / Battery as 3 mini meters in a row
                 HStack(spacing: 10) {
-                    MiniMeter(label: "CPU 0", percent: radio.cpu0,
-                              gradient: [.cyan, Color(red: 0, green: 1, blue: 0.8)])
-                    MiniMeter(label: "CPU 1", percent: radio.cpu1,
-                              gradient: [Color(red: 1, green: 0.4, blue: 0), .orange])
+                    MiniMeter(icon: "antenna.radiowaves.left.and.right",
+                              label: "RSSI",
+                              value: "\(radio.rssi)",
+                              fraction: Double(radio.rssi) / 127.0,
+                              gradient: [.cyan, .green])
+
+                    MiniMeter(icon: "waveform.badge.magnifyingglass",
+                              label: "SNR",
+                              value: "\(radio.snr) dB",
+                              fraction: Double(radio.snr) / 30.0,
+                              gradient: [.orange, .yellow])
+
+                    MiniMeter(icon: batteryIcon,
+                              label: "Batt",
+                              value: "\(Int(radio.batteryPercent))%",
+                              fraction: radio.batteryPercent / 100.0,
+                              gradient: batteryGradient,
+                              valueTint: batteryColor)
+                }
+
+                // Bottom row: CPU 0 + CPU 1 + Seq (compact)
+                HStack(spacing: 10) {
+                    CpuPill(label: "CPU 0", percent: radio.cpu0,
+                            gradient: [.cyan, Color(red: 0, green: 1, blue: 0.8)])
+                    CpuPill(label: "CPU 1", percent: radio.cpu1,
+                            gradient: [Color(red: 1, green: 0.4, blue: 0), .orange])
+                    Spacer(minLength: 0)
+                    HStack(spacing: 4) {
+                        Image(systemName: "number")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text("\(radio.sequenceNumber)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-        }
-    }
-}
-
-// MARK: - Battery Row
-
-private struct BatteryRow: View {
-    @EnvironmentObject var radio: RadioState
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                Image(systemName: batteryIcon)
-                    .foregroundStyle(batteryColor)
-                    .font(.callout)
-                Text("Battery")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(String(format: "%.2f V · %d%%", radio.batteryVoltage, Int(radio.batteryPercent)))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.tertiary).opacity(0.3)
-                    Capsule()
-                        .fill(batteryColor)
-                        .frame(width: geo.size.width * radio.batteryPercent / 100)
-                        .animation(.smooth(duration: 0.3), value: radio.batteryPercent)
-                }
-            }
-            .frame(height: 8)
         }
     }
 
@@ -76,6 +55,13 @@ private struct BatteryRow: View {
         if pct < 20 { return .red }
         if pct < 50 { return .orange }
         return .green
+    }
+
+    private var batteryGradient: [Color] {
+        let pct = radio.batteryPercent
+        if pct < 20 { return [.red, .red] }
+        if pct < 50 { return [.orange, .yellow] }
+        return [.green, .green]
     }
 
     private var batteryIcon: String {
@@ -88,59 +74,29 @@ private struct BatteryRow: View {
     }
 }
 
-// MARK: - Mini CPU Meter
+// MARK: - Mini Meter (RSSI / SNR / Battery)
 
 private struct MiniMeter: View {
-    let label: String
-    let percent: Int
-    let gradient: [Color]
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                Text(label)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(percent)%")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.primary)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.tertiary).opacity(0.3)
-                    Capsule()
-                        .fill(LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * Double(min(100, max(0, percent))) / 100)
-                        .animation(.smooth(duration: 0.3), value: percent)
-                }
-            }
-            .frame(height: 6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .glassEffect(.regular, in: .rect(cornerRadius: 12))
-    }
-}
-
-// MARK: - Meter Row
-
-struct MeterRow: View {
+    let icon: String
     let label: String
     let value: String
     let fraction: Double
     let gradient: [Color]
+    var valueTint: Color? = nil
 
     var body: some View {
-        VStack(spacing: 4) {
-            HStack {
+        VStack(spacing: 5) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.caption2)
+                    .foregroundStyle(valueTint ?? .secondary)
                 Text(label)
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
-                Spacer()
+                Spacer(minLength: 0)
                 Text(value)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.primary)
+                    .font(.caption2.monospaced().weight(.medium))
+                    .foregroundStyle(valueTint ?? .primary)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -151,27 +107,78 @@ struct MeterRow: View {
                         .animation(.smooth(duration: 0.3), value: fraction)
                 }
             }
+            .frame(height: 5)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
+    }
+}
+
+// MARK: - CPU Pill (small inline percent)
+
+private struct CpuPill: View {
+    let label: String
+    let percent: Int
+    let gradient: [Color]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+            ZStack(alignment: .leading) {
+                Capsule().fill(.tertiary).opacity(0.3)
+                Capsule()
+                    .fill(LinearGradient(colors: gradient,
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: 36 * Double(min(100, max(0, percent))) / 100)
+                    .animation(.smooth(duration: 0.3), value: percent)
+            }
+            .frame(width: 36, height: 4)
+            Text("\(percent)%")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+// MARK: - Legacy MeterRow / StatBox (kept in case other files import them)
+
+struct MeterRow: View {
+    let label: String
+    let value: String
+    let fraction: Double
+    let gradient: [Color]
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Spacer()
+                Text(value).font(.caption.monospaced()).foregroundStyle(.primary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.tertiary).opacity(0.3)
+                    Capsule()
+                        .fill(LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width * min(1, max(0, fraction)))
+                }
+            }
             .frame(height: 8)
         }
     }
 }
 
-// MARK: - Stat Box (kept for any remaining uses)
-
 struct StatBox: View {
     let value: String
     let label: String
-
     var body: some View {
         VStack(spacing: 2) {
-            Text(value)
-                .font(.title3.monospaced().weight(.semibold))
-                .foregroundStyle(.accent)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(label)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
+            Text(value).font(.title3.monospaced().weight(.semibold)).foregroundStyle(.accent)
+            Text(label).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)

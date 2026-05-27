@@ -4,48 +4,64 @@ import SwiftUI
 
 struct ConnectionStatusButton: View {
     @EnvironmentObject var radio: RadioState
+    @EnvironmentObject var theme: ThemeStore
     @ObservedObject private var ble = BLEManager.shared
     @State private var showPicker = false
+    @State private var pulse = false
 
     var body: some View {
         Button {
-            if radio.isConnected {
-                showPicker = true
-            } else {
-                showPicker = true
-                ble.startScan()
-            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showPicker = true
+            if !radio.isConnected { ble.startScan() }
         } label: {
-            HStack(spacing: 6) {
-                connectionDot
-                Text(radio.isConnected ? (radio.connectionStatus) : "Connect")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
+            ZStack {
+                if radio.isConnected {
+                    Circle()
+                        .stroke(Color.green.opacity(0.6), lineWidth: 1.5)
+                        .frame(width: 34, height: 34)
+                        .scaleEffect(pulse ? 1.15 : 1.0)
+                        .opacity(pulse ? 0 : 1)
+                        .animation(
+                            .easeOut(duration: 1.4).repeatForever(autoreverses: false),
+                            value: pulse
+                        )
+                }
+
+                Image(systemName: bluetoothIcon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(iconForeground)
+                    .frame(width: 34, height: 34)
+                    .background {
+                        Circle()
+                            .fill(.thinMaterial)
+                            .overlay(Circle().stroke(borderColor, lineWidth: 1))
+                    }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .glassEffect(.regular, in: .capsule)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(radio.isConnected ? "Connected to \(radio.connectionStatus)" : "Connect via Bluetooth")
         .sheet(isPresented: $showPicker, onDismiss: {
             if !radio.isConnected { ble.stopScan() }
         }) {
             DevicePickerSheet(isPresented: $showPicker)
         }
+        .onAppear { pulse = true }
     }
 
-    @ViewBuilder
-    private var connectionDot: some View {
-        ZStack {
-            if radio.isConnected {
-                Circle()
-                    .fill(Color.green.opacity(0.35))
-                    .frame(width: 14, height: 14)
-            }
-            Circle()
-                .fill(radio.isConnected ? Color.green : Color.secondary.opacity(0.6))
-                .frame(width: 8, height: 8)
-        }
+    private var bluetoothIcon: String {
+        if radio.isConnected { return "dot.radiowaves.left.and.right" }
+        return "antenna.radiowaves.left.and.right.slash"
+    }
+
+    private var iconForeground: Color {
+        radio.isConnected ? .green : theme.current.accentColor
+    }
+
+    private var borderColor: Color {
+        radio.isConnected
+            ? Color.green.opacity(0.5)
+            : theme.current.accentColor.opacity(0.45)
     }
 }
 
@@ -55,6 +71,7 @@ struct DevicePickerSheet: View {
     @Binding var isPresented: Bool
     @ObservedObject private var ble = BLEManager.shared
     @EnvironmentObject var radio: RadioState
+    @EnvironmentObject var theme: ThemeStore
 
     var body: some View {
         NavigationStack {
@@ -87,7 +104,7 @@ struct DevicePickerSheet: View {
                                 HStack(spacing: 14) {
                                     Image(systemName: "antenna.radiowaves.left.and.right")
                                         .font(.callout)
-                                        .foregroundStyle(.accent)
+                                        .foregroundStyle(theme.current.accentColor)
                                         .frame(width: 28)
                                     Text(device.name ?? device.identifier.uuidString)
                                         .foregroundStyle(.primary)

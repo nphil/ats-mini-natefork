@@ -132,7 +132,6 @@ private struct PresetRow: View {
                     Button("Load", action: onLoad)
                         .buttonStyle(.glass)
                         .controlSize(.small)
-                        .tint(.accent)
 
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
