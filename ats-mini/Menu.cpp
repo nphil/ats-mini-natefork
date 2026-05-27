@@ -7,6 +7,7 @@
 #include "Ble.h"
 #include "Menu.h"
 #include "Storage.h"
+#include <WiFi.h>
 
 //
 // Bands Menu
@@ -238,8 +239,60 @@ int getTotalBleModes() { return(ITEM_COUNT(bleModeDesc)); }
 //
 
 uint8_t wifiModeIdx = NET_OFF;
-static const char *wifiModeDesc[] =
-{ "Off", "AP Only", "AP+Connect", "Connect", "Sync Only" };
+
+// ── WiFi menu sub-state machine ───────────────────────────────────────────────
+//
+// wifiModeIdx stores the active NET_ value (NET_OFF / NET_AP_ONLY / NET_CONNECT)
+// and is saved to NVS exactly as before, so ats-mini.ino / Utils.cpp / Storage.cpp
+// don't need to change.  The menu presents three simplified choices:
+//   0 → Off  (NET_OFF)
+//   1 → Access Point  (NET_AP_ONLY)
+//   2 → Connect  (NET_CONNECT)
+// and navigates through scan + keyboard sub-screens for "Connect".
+
+static const char *wifiModeDesc[] = { "Off", "Access Point", "Connect" };
+static const int   wifiModeNet[]  = { NET_OFF, NET_AP_ONLY, NET_CONNECT };
+
+enum WifiUiState : uint8_t {
+  WIFI_UI_MODE = 0,    // top-level: Off / AP / Connect picker
+  WIFI_UI_NETWORKS,    // scanned network list
+  WIFI_UI_KEYBOARD,    // password keyboard
+};
+
+static WifiUiState wifiUiState    = WIFI_UI_MODE;
+static int         wifiDispSel    = 0;   // highlighted row in mode picker
+static int         wifiNetCount   = 0;
+static int         wifiNetIdx     = 0;
+static String      wifiSelSsid;
+static bool        wifiNeedPass   = false;
+static char        wifiPwdBuf[64] = "";
+static int         wifiPwdLen     = 0;
+static int         wifiKbIdx      = 0;
+static bool        wifiKbCaps     = false;
+
+// Maps the stored NET_ value back to a display index (0/1/2)
+static int wifiNetToDisp(uint8_t net) {
+  if (net == NET_AP_ONLY) return 1;
+  if (net == NET_OFF)     return 0;
+  return 2;  // NET_CONNECT and any legacy AP_CONNECT / SYNC
+}
+
+// ── Keyboard character table ──────────────────────────────────────────────────
+// 4 rows × 10 keys + 4 special keys at the end
+// '\x01'=SPACE '\x02'=CAPS '\x03'=DEL '\x04'=OK
+static const char kbFlat[] =
+  "1234567890"   // row 0, idx  0-9
+  "qwertyuiop"   // row 1, idx 10-19
+  "asdfghjkl@"   // row 2, idx 20-29
+  "zxcvbnm.-_"   // row 3, idx 30-39
+  "\x01\x02\x03\x04";  // SPACE CAPS DEL OK, idx 40-43
+#define KB_ROWS   4
+#define KB_COLS  10
+#define KB_SPACE 40
+#define KB_CAPS  41
+#define KB_DEL   42
+#define KB_OK    43
+#define KB_TOTAL 44
 
 //
 // Step Menu
@@ -612,15 +665,118 @@ static void doBleMode(int16_t enc)
   bleModeIdx = newBleModeIdx;
 }
 
+// ── WiFi encoder handler ──────────────────────────────────────────────────────
 static void doWiFiMode(int16_t enc)
 {
-  wifiModeIdx = wrap_range(wifiModeIdx, enc, 0, LAST_ITEM(wifiModeDesc));
+  switch (wifiUiState) {
+    case WIFI_UI_MODE:
+      wifiDispSel = wrap_range(wifiDispSel, enc, 0, LAST_ITEM(wifiModeDesc));
+      break;
+    case WIFI_UI_NETWORKS:
+      if (wifiNetCount > 0)
+        wifiNetIdx = wrap_range(wifiNetIdx, enc, 0, wifiNetCount - 1);
+      break;
+    case WIFI_UI_KEYBOARD:
+      wifiKbIdx = (wifiKbIdx + enc + KB_TOTAL) % KB_TOTAL;
+      break;
+  }
 }
 
-static void clickWiFiMode(uint8_t mode, bool shortPress)
+// ── WiFi click handler ────────────────────────────────────────────────────────
+static void clickWiFiMode(uint8_t /*mode*/, bool shortPress)
 {
-  currentCmd = CMD_NONE;
-  netInit(mode);
+  // Long press always goes back one level (or closes if at top)
+  if (!shortPress) {
+    if (wifiUiState == WIFI_UI_MODE) {
+      currentCmd = CMD_NONE;
+    } else {
+      wifiUiState = (wifiUiState == WIFI_UI_KEYBOARD) ? WIFI_UI_NETWORKS : WIFI_UI_MODE;
+      WiFi.scanDelete();
+    }
+    return;
+  }
+
+  switch (wifiUiState) {
+
+    case WIFI_UI_MODE: {
+      int sel = wifiDispSel;
+      if (sel == 0 || sel == 1) {
+        // Off or Access Point — apply immediately and close menu
+        wifiModeIdx = (uint8_t)wifiModeNet[sel];
+        prefsRequestSave(SAVE_SETTINGS);
+        netInit(wifiModeNet[sel]);
+        wifiUiState = WIFI_UI_MODE;
+        currentCmd  = CMD_NONE;
+      } else {
+        // Connect — scan for networks
+        drawScreen("Scanning WiFi networks...", "Please wait");
+        spr.pushSprite(0, 0);
+        // Ensure STA mode is active for scan
+        if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
+        WiFi.scanDelete();
+        wifiNetCount = WiFi.scanNetworks(false, true);
+        wifiNetIdx   = 0;
+        wifiUiState  = (wifiNetCount > 0) ? WIFI_UI_NETWORKS : WIFI_UI_MODE;
+        if (wifiNetCount <= 0) {
+          drawScreen("No networks found", "Check antenna or move closer");
+          spr.pushSprite(0, 0);
+          delay(2000);
+        }
+      }
+      break;
+    }
+
+    case WIFI_UI_NETWORKS: {
+      if (wifiNetCount == 0) break;
+      wifiSelSsid  = WiFi.SSID(wifiNetIdx);
+      wifiNeedPass = (WiFi.encryptionType(wifiNetIdx) != WIFI_AUTH_OPEN);
+      if (wifiNeedPass) {
+        // Clear password buffer and enter keyboard
+        memset(wifiPwdBuf, 0, sizeof(wifiPwdBuf));
+        wifiPwdLen = 0;
+        wifiKbIdx  = 0;
+        wifiKbCaps = false;
+        wifiUiState = WIFI_UI_KEYBOARD;
+      } else {
+        // Open network — connect directly
+        wifiSaveCredentials(wifiSelSsid, "");
+        wifiModeIdx = NET_CONNECT;
+        prefsRequestSave(SAVE_SETTINGS);
+        netInit(NET_CONNECT);
+        WiFi.scanDelete();
+        wifiUiState = WIFI_UI_MODE;
+        currentCmd  = CMD_NONE;
+      }
+      break;
+    }
+
+    case WIFI_UI_KEYBOARD: {
+      char ch = kbFlat[wifiKbIdx];
+      if (wifiKbIdx == KB_DEL) {
+        if (wifiPwdLen > 0) wifiPwdBuf[--wifiPwdLen] = '\0';
+      } else if (wifiKbIdx == KB_CAPS) {
+        wifiKbCaps = !wifiKbCaps;
+      } else if (wifiKbIdx == KB_OK) {
+        // Connect with entered password
+        wifiSaveCredentials(wifiSelSsid, String(wifiPwdBuf));
+        wifiModeIdx = NET_CONNECT;
+        prefsRequestSave(SAVE_SETTINGS);
+        netInit(NET_CONNECT);
+        WiFi.scanDelete();
+        wifiUiState = WIFI_UI_MODE;
+        currentCmd  = CMD_NONE;
+      } else {
+        // Regular character
+        if (wifiPwdLen < (int)sizeof(wifiPwdBuf) - 1) {
+          char c = (ch == '\x01') ? ' ' : ch;
+          if (wifiKbCaps && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+          wifiPwdBuf[wifiPwdLen++] = c;
+          wifiPwdBuf[wifiPwdLen]   = '\0';
+        }
+      }
+      break;
+    }
+  }
 }
 
 static void doRDSMode(int16_t enc)
@@ -887,7 +1043,12 @@ static void clickSettings(int cmd, bool shortPress)
     case MENU_SLEEPMODE:  currentCmd = CMD_SLEEPMODE;  break;
     case MENU_USBMODE:    currentCmd = CMD_USBMODE;    break;
     case MENU_BLEMODE:     currentCmd = CMD_BLEMODE;     break;
-    case MENU_WIFIMODE:    currentCmd = CMD_WIFIMODE;    break;
+    case MENU_WIFIMODE:
+      // Sync highlight to current active mode when entering the menu
+      wifiDispSel = wifiNetToDisp(wifiModeIdx);
+      wifiUiState = WIFI_UI_MODE;
+      currentCmd  = CMD_WIFIMODE;
+      break;
     case MENU_FM_REGION:
       // Only in FM mode
       if(currentMode==FM) currentCmd = CMD_FM_REGION;
@@ -1294,22 +1455,154 @@ static void drawBleMode(int x, int y, int sx)
   }
 }
 
-static void drawWiFiMode(int x, int y, int sx)
+// ── WiFi draw: mode picker ────────────────────────────────────────────────────
+static void drawWiFiModeList(int x, int y, int sx)
 {
   drawCommon(settings[MENU_WIFIMODE], x, y, sx, true);
-
   int count = ITEM_COUNT(wifiModeDesc);
-  for(int i=-2 ; i<3 ; i++)
-  {
-    if(i==0) {
-      drawZoomedMenu(wifiModeDesc[abs((wifiModeIdx+count+i)%count)]);
+  for (int i = -2; i < 3; i++) {
+    int idx = (wifiDispSel + count + i) % count;
+    spr.setTextDatum(MC_DATUM);
+    if (i == 0) {
+      drawZoomedMenu(wifiModeDesc[idx]);
       spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
     } else {
       spr.setTextColor(TH.menu_item);
     }
+    spr.drawString(wifiModeDesc[idx], 40+x+(sx/2), 64+y+(i*16), 2);
+  }
+}
 
+// ── WiFi draw: scanned network list (full-screen overlay) ────────────────────
+static void drawWiFiNetworksList()
+{
+  const int HDR  = 22;
+  const int ROWH = 21;
+
+  spr.fillRect(0, 0, 320, 170, TH.bg);
+  spr.fillRect(0, 0, 320, HDR, TH.menu_bg);
+  spr.drawLine(0, HDR, 320, HDR, TH.menu_border);
+  spr.setTextDatum(ML_DATUM);
+  spr.setTextColor(TH.menu_hdr);
+  spr.drawString("Select Network", 8, HDR/2, 2);
+
+  int visible = (170 - HDR) / ROWH;  // how many rows fit
+  int start   = max(0, wifiNetIdx - visible/2);
+  if (start + visible > wifiNetCount) start = max(0, wifiNetCount - visible);
+
+  for (int i = 0; i < visible && (start + i) < wifiNetCount; i++) {
+    int ni  = start + i;
+    int ry  = HDR + i * ROWH;
+    bool sel = (ni == wifiNetIdx);
+
+    if (sel) spr.fillRect(0, ry, 320, ROWH, TH.menu_hl_bg);
+    spr.drawLine(0, ry + ROWH - 1, 320, ry + ROWH - 1, TH.menu_border);
+
+    // SSID (truncated at 260px to leave room for icons)
+    spr.setTextDatum(ML_DATUM);
+    spr.setTextColor(sel ? TH.menu_hl_text : TH.menu_item);
+    String ssid = WiFi.SSID(ni);
+    spr.drawString(ssid, 6, ry + ROWH/2, 2);
+
+    // Lock icon for encrypted networks
+    bool secured = (WiFi.encryptionType(ni) != WIFI_AUTH_OPEN);
+
+    // Signal bars (4-bar style, right-aligned)
+    int rssi = WiFi.RSSI(ni);
+    int bars = constrain(map(rssi, -90, -55, 1, 4), 1, 4);
+    int bx   = secured ? 290 : 310;
+    for (int b = 0; b < 4; b++) {
+      int bh    = (b + 1) * 3;
+      int bby   = ry + ROWH - 2 - bh;
+      uint16_t c = (b < bars)
+                    ? (sel ? TH.menu_hl_text : TH.menu_hdr)
+                    : TH.menu_border;
+      spr.fillRect(bx + b*4, bby, 3, bh, c);
+    }
+    if (secured) {
+      spr.setTextDatum(MR_DATUM);
+      spr.setTextColor(sel ? TH.menu_hl_text : TH.menu_item);
+      spr.drawString("*", 320, ry + ROWH/2, 2);
+    }
+  }
+
+  // Bottom hint
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("Turn=scroll  Click=select  Hold=back", 160, 167, 1);
+}
+
+// ── WiFi draw: password keyboard (full-screen overlay) ───────────────────────
+static void drawWiFiKeyboard()
+{
+  // Layout: header 36px | 4 key rows 28px each (112px) | special row 22px
+  const int HDR  = 36;
+  const int ROWH = 28;
+  const int KEYW = 32;   // regular key width  (10 × 32 = 320)
+  const int SPY  = HDR + KB_ROWS * ROWH;  // y of special row
+
+  spr.fillRect(0, 0, 320, 170, TH.bg);
+
+  // Header: SSID + password field
+  spr.fillRect(0, 0, 320, HDR, TH.menu_bg);
+  spr.drawLine(0, HDR, 320, HDR, TH.menu_border);
+  spr.setTextDatum(ML_DATUM);
+  spr.setTextColor(TH.menu_hdr);
+  String hdr = "SSID: " + wifiSelSsid;
+  spr.drawString(hdr, 5, 8, 2);
+  spr.setTextColor(TH.menu_item);
+  String pwd = "Pass: ";
+  for (int i = 0; i < wifiPwdLen; i++) pwd += '*';
+  pwd += '_';
+  spr.drawString(pwd, 5, 22, 2);
+
+  // Regular key rows (0-3)
+  for (int row = 0; row < KB_ROWS; row++) {
+    for (int col = 0; col < KB_COLS; col++) {
+      int kidx = row * KB_COLS + col;
+      int kx   = col * KEYW;
+      int ky   = HDR + row * ROWH;
+      bool sel = (wifiKbIdx == kidx);
+
+      spr.fillRect(kx+1, ky+1, KEYW-2, ROWH-2,
+                   sel ? TH.menu_hl_bg : TH.menu_bg);
+      spr.drawRect(kx, ky, KEYW, ROWH, TH.menu_border);
+
+      char ch = kbFlat[kidx];
+      if (wifiKbCaps && ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A';
+      char label[2] = {ch, '\0'};
+      spr.setTextDatum(MC_DATUM);
+      spr.setTextColor(sel ? TH.menu_hl_text : TH.menu_item);
+      spr.drawString(label, kx + KEYW/2, ky + ROWH/2, 2);
+    }
+  }
+
+  // Special row: SPACE (128px) | CAPS (64px) | DEL (64px) | OK (64px)
+  struct { const char* lbl; int x; int w; int idx; } specials[] = {
+    { "SPACE", 0,   128, KB_SPACE },
+    { "CAPS",  128,  64, KB_CAPS  },
+    { "DEL",   192,  64, KB_DEL   },
+    { "OK",    256,  64, KB_OK    },
+  };
+  for (auto& sp : specials) {
+    bool sel = (wifiKbIdx == sp.idx);
+    bool capsOn = (sp.idx == KB_CAPS && wifiKbCaps);
+    uint16_t bg = (sel || capsOn) ? TH.menu_hl_bg : TH.menu_bg;
+    spr.fillRect(sp.x+1, SPY+1, sp.w-2, 170-SPY-2, bg);
+    spr.drawRect(sp.x, SPY, sp.w, 170-SPY, TH.menu_border);
     spr.setTextDatum(MC_DATUM);
-    spr.drawString(wifiModeDesc[abs((wifiModeIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+    spr.setTextColor((sel || capsOn) ? TH.menu_hl_text : TH.menu_item);
+    spr.drawString(sp.lbl, sp.x + sp.w/2, SPY + (170-SPY)/2, 2);
+  }
+}
+
+// ── WiFi draw dispatcher ──────────────────────────────────────────────────────
+static void drawWiFiMode(int x, int y, int sx)
+{
+  switch (wifiUiState) {
+    case WIFI_UI_MODE:     drawWiFiModeList(x, y, sx);   break;
+    case WIFI_UI_NETWORKS: drawWiFiNetworksList();         break;
+    case WIFI_UI_KEYBOARD: drawWiFiKeyboard();             break;
   }
 }
 

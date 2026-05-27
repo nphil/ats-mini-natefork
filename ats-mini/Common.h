@@ -242,6 +242,7 @@ bool ntpSyncTime();
 
 void netRequestConnect();
 void netTickTime();
+void wifiSaveCredentials(const String& ssid, const String& password);
 
 // Remote.c
 #define REMOTE_CHANGED   1

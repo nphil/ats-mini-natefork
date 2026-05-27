@@ -4,6 +4,13 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.38 (2026-05-27)
+
+### Changed
+
+- **Redesigned WiFi menu with on-device network picker and keyboard.** The old web-form-only workflow is replaced by a three-screen flow directly on the radio: pick *Off / Access Point / Connect*, scan and choose a network from the list (with RSSI bars and lock icon for secured networks), then type the password on a full-screen on-device keyboard. Open networks skip the password step entirely.
+- WiFi settings now offer only the three modes that matter: **Off**, **Access Point**, and **Connect** (join your home network). The unused AP+Connect and Sync-only modes have been removed; devices upgrading with those modes saved will automatically switch to Connect.
+
 ## 2.37 (2026-05-27)
 
 ### Changed
