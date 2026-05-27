@@ -2,6 +2,14 @@
 
 Project guidelines for Claude when working on this repo.
 
+## Apply to all iOS apps
+
+The conventions below are **the user's standard iOS-app deployment
+template** — apply them to any iOS app repo, not just this one. If
+working on a new iOS app and `CLAUDE.md` / `apps.json` /
+`.github/workflows/ios.yml` aren't present in the template form below,
+set them up proactively before shipping.
+
 ## Workflow preferences
 
 - **Never create pull requests as a discussion artifact.** When a task is
@@ -9,16 +17,21 @@ Project guidelines for Claude when working on this repo.
   merge to `main` via the GitHub MCP (`create_pull_request` →
   `merge_pull_request`, no review wait). Do not ask the user how to land
   a change.
-- **Releases are fully automatic.** Once a `main`-bound merge lands, the
-  pipeline does the rest:
+- **Releases are fully automatic** and self-contained in a single
+  workflow run. Once a `main`-bound merge lands:
   1. `.github/workflows/ios.yml` reads `MARKETING_VERSION` from
      `ios/project.yml`. If there's no matching `ios-v<version>` release
      yet, it auto-creates the tag at the current SHA, builds the
      unsigned IPA, and publishes the release with the contents of
      `ios/RELEASE_NOTES.md` as the body.
-  2. `.github/workflows/update-repo.yml` fires on the release-published
-     event, patches `apps.json` with the new version + IPA URL, and
-     commits back to `main`. This is the Feather / AltStore manifest.
+  2. The **same job** then patches `apps.json` (the Feather / AltStore
+     manifest) with the new version + IPA URL and commits to `main`
+     with `[skip ci]`.
+- **Do not use a separate `release: published` workflow** for the
+  manifest update. Releases created by a workflow using `GITHUB_TOKEN`
+  do not fire downstream workflows (GitHub suppresses these events to
+  prevent infinite loops). The in-band step in `ios.yml` is the
+  durable fix — keep it; do not reintroduce `update-repo.yml`.
 - Push to the designated dev branch only (system-enforced by the remote
   proxy), then use MCP for the merge to `main` — never bypass with a
   direct push to `main`.
