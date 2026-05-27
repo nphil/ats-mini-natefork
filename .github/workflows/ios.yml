@@ -23,30 +23,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Read version from project.yml
+      - name: Compute next version
         id: ver
         run: |
           VERSION=$(grep -E '^\s+MARKETING_VERSION:' ios/project.yml \
             | head -1 | awk '{print $2}' | tr -d '"')
-          TAG="ios-v${VERSION}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          BUILD=$(grep -E '^\s+CURRENT_PROJECT_VERSION:' ios/project.yml \
+            | head -1 | awk '{print $2}' | tr -d '"')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW_VER="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          NEW_BUILD="$((BUILD + 1))"
+          echo "version=${NEW_VER}" >> "$GITHUB_OUTPUT"
+          echo "build=${NEW_BUILD}"  >> "$GITHUB_OUTPUT"
+          echo "tag=ios-v${NEW_VER}" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if already released
-        id: check
+      - name: Update version in project.yml
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.ver.outputs.version }}
+          NEW_BUILD:   ${{ steps.ver.outputs.build }}
         run: |
-          TAG="${{ steps.ver.outputs.tag }}"
-          if gh release view "${TAG}" --repo "${{ github.repository }}" &>/dev/null; then
-            echo "already=true" >> "$GITHUB_OUTPUT"
-            echo "${TAG} already exists — nothing to release."
-          else
-            echo "already=false" >> "$GITHUB_OUTPUT"
-          fi
+          python3 - <<'PYEOF'
+          import os, re
+          ver   = os.environ['NEW_VERSION']
+          build = os.environ['NEW_BUILD']
+          with open('ios/project.yml') as f:
+              text = f.read()
+          text = re.sub(r'MARKETING_VERSION: "[^"]*"',
+                        f'MARKETING_VERSION: "{ver}"', text)
+          text = re.sub(r'CURRENT_PROJECT_VERSION: "[^"]*"',
+                        f'CURRENT_PROJECT_VERSION: "{build}"', text)
+          with open('ios/project.yml', 'w') as f:
+              f.write(text)
+          print(f'Bumped to {ver} (build {build})')
+          PYEOF
 
       - name: Select Xcode
-        if: steps.check.outputs.already != 'true'
         run: |
           LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           echo "Using: $LATEST"
@@ -54,15 +65,12 @@ jobs:
           xcodebuild -version
 
       - name: Install xcodegen
-        if: steps.check.outputs.already != 'true'
         run: brew install xcodegen
 
       - name: Generate Xcode project
-        if: steps.check.outputs.already != 'true'
         run: cd ios && xcodegen generate --spec project.yml
 
       - name: Archive (unsigned)
-        if: steps.check.outputs.already != 'true'
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -79,7 +87,6 @@ jobs:
             | xcpretty || exit ${PIPESTATUS[0]}
 
       - name: Package IPA
-        if: steps.check.outputs.already != 'true'
         run: |
           APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive" \
             -name "*.app" ! -name "*.xctest" ! -path "*/SwiftSupport/*" \
@@ -94,8 +101,7 @@ jobs:
           zip -r ATSMini.ipa Payload/
           echo "IPA: $(du -sh ATSMini.ipa | cut -f1)"
 
-      - name: Update apps.json, tag, and publish release
-        if: steps.check.outputs.already != 'true'
+      - name: Commit version bump, update apps.json, tag, and publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -106,17 +112,15 @@ jobs:
           IPA_SIZE=$(wc -c < ATSMini.ipa | tr -d ' ')
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/ATSMini.ipa"
 
-          # Build release notes file — avoids multi-line bash strings at col 0 in YAML
           NOTES_FILE="ios/RELEASE_NOTES.md"
           if [ -f "$NOTES_FILE" ]; then
             cp "$NOTES_FILE" release-notes.md
           else
             echo "Unsigned IPA — sideload with AltStore / SideStore / Feather." > release-notes.md
           fi
-          printf '\n\nBuilt from `%s` on %s\n' "${SHORT_SHA}" "$(date -u +'%Y-%m-%d %H:%M UTC')" \
-            >> release-notes.md
+          printf '\n\nBuilt from `%s` on %s\n' \
+            "${SHORT_SHA}" "$(date -u +'%Y-%m-%d %H:%M UTC')" >> release-notes.md
 
-          # Patch apps.json (reads notes from file instead of env var)
           VERSION="$VERSION" PUBLISHED_DATE="$PUBLISHED_DATE" \
           DOWNLOAD_URL="$DOWNLOAD_URL" IPA_SIZE="$IPA_SIZE" \
           python3 - <<'PYEOF'
@@ -145,13 +149,11 @@ jobs:
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add apps.json
-          if ! git diff --cached --quiet; then
-            git commit -m "Update Feather repo for ${TAG} [skip ci]"
-            git fetch origin main
-            git rebase origin/main
-            git push origin main
-          fi
+          git add ios/project.yml apps.json
+          git commit -m "chore: bump iOS to ${VERSION} [skip ci]"
+          git fetch origin main
+          git rebase origin/main
+          git push origin main
 
           git tag "$TAG"
           git push origin "$TAG"
