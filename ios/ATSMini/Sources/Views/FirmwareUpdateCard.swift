@@ -136,9 +136,10 @@ private extension String {
     var utf8Data: Data { Data(utf8) }
 }
 
-// MARK: - Settings / Firmware Update View
+// MARK: - Settings View (Theme + Firmware + About)
 
-struct FirmwareUpdateView: View {
+struct SettingsView: View {
+    @EnvironmentObject var theme: ThemeStore
     @StateObject private var ota = OTAManager()
 
     enum Source: String, CaseIterable, Identifiable {
@@ -151,9 +152,39 @@ struct FirmwareUpdateView: View {
     @State private var host = "atsmini.local"
     @State private var firmwareURL = ""
     @State private var showFilePicker = false
+    @State private var showThemePicker = false
 
     var body: some View {
         Form {
+            // MARK: Theme
+            Section {
+                Button {
+                    showThemePicker = true
+                } label: {
+                    HStack(spacing: 14) {
+                        ThemeSwatch(theme: theme.current, isSelected: false, size: 32)
+                            .allowsHitTesting(false)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Theme")
+                                .foregroundStyle(.primary)
+                            Text(theme.current.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("30 color themes ported from Homebox / HomeBoy.")
+            }
+
+            // MARK: Firmware connection
             Section {
                 LabeledContent("Device") {
                     TextField("atsmini.local or IP", text: $host)
@@ -162,12 +193,12 @@ struct FirmwareUpdateView: View {
                         .autocorrectionDisabled()
                 }
             } header: {
-                Text("Connection")
+                Text("Firmware — Connection")
             } footer: {
                 Text("Phone must be on the same Wi-Fi network as the device (or connected to the device's AP).")
             }
 
-            Section("Source") {
+            Section("Firmware — Source") {
                 Picker("Update from", selection: $source) {
                     ForEach(Source.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -194,7 +225,7 @@ struct FirmwareUpdateView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
-                    .tint(.accent)
+                    .tint(theme.current.accentColor)
                     .disabled(ota.phase.isActive)
                 } else {
                     Button {
@@ -204,7 +235,7 @@ struct FirmwareUpdateView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
-                    .tint(.accent)
+                    .tint(theme.current.accentColor)
                     .disabled(ota.phase.isActive || firmwareURL.isEmpty)
                 }
 
@@ -240,6 +271,15 @@ struct FirmwareUpdateView: View {
                     Text("Progress")
                 }
             }
+
+            // MARK: About
+            Section("About") {
+                LabeledContent("Version", value: appVersion)
+                LabeledContent("Build", value: appBuild)
+                Link(destination: URL(string: "https://github.com/nphil/ats-mini-natefork")!) {
+                    Label("GitHub", systemImage: "link")
+                }
+            }
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -251,6 +291,17 @@ struct FirmwareUpdateView: View {
                 ota.flashFromFile(url, host: host, ble: BLEManager.shared)
             }
         }
+        .sheet(isPresented: $showThemePicker) {
+            ThemePickerSheet(isPresented: $showThemePicker)
+        }
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    private var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
     }
 
     // MARK: - Status helpers
@@ -292,7 +343,106 @@ struct FirmwareUpdateView: View {
         switch ota.phase {
         case .done:  return .green
         case .error: return .red
-        default:     return .accent
+        default:     return theme.current.accentColor
         }
+    }
+}
+
+// MARK: - Theme Picker Sheet + Swatch
+
+struct ThemePickerSheet: View {
+    @Binding var isPresented: Bool
+    @EnvironmentObject var theme: ThemeStore
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 18) {
+                        ForEach(AppTheme.allCases) { t in
+                            ThemeSwatchButton(theme: t,
+                                              isSelected: theme.current == t) {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                theme.set(t)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                }
+                .scrollIndicators(.hidden)
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Choose Theme")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { isPresented = false }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+struct ThemeSwatchButton: View {
+    let theme: AppTheme
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 6) {
+                ThemeSwatch(theme: theme, isSelected: isSelected, size: 56)
+                Text(theme.displayName)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ThemeSwatch: View {
+    let theme: AppTheme
+    let isSelected: Bool
+    var size: CGFloat = 48
+
+    var body: some View {
+        ZStack {
+            // Background
+            Circle()
+                .fill(theme.backgroundColor)
+                .frame(width: size, height: size)
+                .overlay {
+                    Circle().stroke(.secondary.opacity(0.25), lineWidth: 1)
+                }
+
+            // Primary accent dot (top-left)
+            Circle()
+                .fill(theme.primaryColor)
+                .frame(width: size * 0.46, height: size * 0.46)
+                .offset(x: -size * 0.13, y: -size * 0.04)
+
+            // Accent dot (bottom-right)
+            Circle()
+                .fill(theme.accentColor)
+                .frame(width: size * 0.29, height: size * 0.29)
+                .offset(x: size * 0.19, y: size * 0.13)
+
+            // Selection ring
+            if isSelected {
+                Circle()
+                    .stroke(theme.accentColor, lineWidth: 3)
+                    .frame(width: size + 6, height: size + 6)
+            }
+        }
+        .frame(width: size + 8, height: size + 8)
     }
 }

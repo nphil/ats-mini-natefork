@@ -114,7 +114,6 @@ struct WaterfallCard: View {
                         }
                         .frame(maxWidth: .infinity)
                         .buttonStyle(.glassProminent)
-                        .tint(.accent)
 
                         Button("Reset") {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()

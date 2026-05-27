@@ -29,7 +29,6 @@ struct SpectrumCard: View {
 
                 if radio.isScanning {
                     ProgressView(value: radio.scanProgress, total: 100)
-                        .tint(.accent)
                 }
 
                 LabeledContent("Step") {
@@ -75,7 +74,6 @@ struct SpectrumCard: View {
                                 .padding(.vertical, 4)
                         }
                         .buttonStyle(.glassProminent)
-                        .tint(.accent)
                         .disabled(!radio.isConnected || radio.isScanning)
 
                         Button(role: .destructive) {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FrequencyCard: View {
     @EnvironmentObject var radio: RadioState
+    @EnvironmentObject var theme: ThemeStore
     @ObservedObject private var ble = BLEManager.shared
     @State private var quickTuneText = ""
     @State private var showQuickTune = false
@@ -10,17 +11,16 @@ struct FrequencyCard: View {
     private let impact = UIImpactFeedbackGenerator(style: .medium)
 
     var body: some View {
-        GlassCard {
-            VStack(spacing: 16) {
+        GlassCard(padding: 14) {
+            VStack(spacing: 10) {
 
                 // Frequency display
-                VStack(spacing: 6) {
+                VStack(spacing: 2) {
                     Text(radio.formattedFrequency)
-                        .font(.system(size: 56, weight: .semibold, design: .rounded))
+                        .font(.system(size: 52, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
-                        .foregroundStyle(.primary)
                         .contentTransition(.numericText())
                         .onTapGesture {
                             impact.impactOccurred()
@@ -31,8 +31,10 @@ struct FrequencyCard: View {
                     HStack(spacing: 14) {
                         ForEach(FreqUnit.allCases, id: \.self) { unit in
                             Text(unit.rawValue)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(radio.freqDisplayUnit == unit ? Color.accent : .secondary)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(radio.freqDisplayUnit == unit
+                                                 ? theme.current.accentColor
+                                                 : .secondary)
                                 .onTapGesture { radio.freqDisplayUnit = unit }
                         }
                     }
@@ -47,11 +49,11 @@ struct FrequencyCard: View {
                             ble.sendSeek(-1)
                         } label: {
                             Image(systemName: "backward.end.fill")
-                                .font(.title3)
-                                .frame(width: 48, height: 44)
+                                .font(.body)
+                                .frame(width: 44, height: 38)
                         }
                         .buttonStyle(.glass)
-                        .tint(.accent)
+                        .tint(theme.current.accentColor)
                         .disabled(!radio.isConnected || radio.isSeeking)
 
                         Button {
@@ -59,8 +61,8 @@ struct FrequencyCard: View {
                             ble.sendRaw("r")
                         } label: {
                             Image(systemName: "chevron.left")
-                                .font(.title3)
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .font(.body)
+                                .frame(maxWidth: .infinity, minHeight: 38)
                         }
                         .buttonStyle(.glass)
                         .disabled(!radio.isConnected)
@@ -70,8 +72,8 @@ struct FrequencyCard: View {
                             ble.sendRaw("R")
                         } label: {
                             Image(systemName: "chevron.right")
-                                .font(.title3)
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .font(.body)
+                                .frame(maxWidth: .infinity, minHeight: 38)
                         }
                         .buttonStyle(.glass)
                         .disabled(!radio.isConnected)
@@ -81,11 +83,11 @@ struct FrequencyCard: View {
                             ble.sendSeek(1)
                         } label: {
                             Image(systemName: "forward.end.fill")
-                                .font(.title3)
-                                .frame(width: 48, height: 44)
+                                .font(.body)
+                                .frame(width: 44, height: 38)
                         }
                         .buttonStyle(.glass)
-                        .tint(.accent)
+                        .tint(theme.current.accentColor)
                         .disabled(!radio.isConnected || radio.isSeeking)
                     }
                 }
@@ -94,17 +96,9 @@ struct FrequencyCard: View {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                         Text("Seeking…")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.accent)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(theme.current.accentColor)
                     }
-                }
-
-                // Mode info chips
-                FlowLayout(spacing: 8) {
-                    InfoChip(label: "Band", value: radio.bandName)
-                    InfoChip(label: "Mode", value: radio.modeName)
-                    InfoChip(label: "Step", value: radio.stepSize)
-                    InfoChip(label: "BW",   value: radio.bandwidth)
                 }
 
                 // Quick tune
@@ -114,7 +108,7 @@ struct FrequencyCard: View {
                             .font(.system(.body, design: .monospaced))
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 8)
                             .glassEffect(.regular, in: .rect(cornerRadius: 12))
                             .keyboardType(.decimalPad)
                             .focused($quickTuneFocused)
@@ -125,7 +119,7 @@ struct FrequencyCard: View {
                             commitQuickTune()
                         }
                         .buttonStyle(.glassProminent)
-                        .tint(.accent)
+                        .tint(theme.current.accentColor)
                         .disabled(quickTuneText.isEmpty)
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -133,7 +127,7 @@ struct FrequencyCard: View {
 
                 // RDS inline (FM only, when data available)
                 if radio.isFM && hasRDS {
-                    Divider().opacity(0.4)
+                    Divider().opacity(0.35)
                     RDSInline()
                 }
             }
@@ -170,19 +164,28 @@ struct FrequencyCard: View {
     }
 }
 
-// MARK: - RDS Inline (shown inside FrequencyCard)
+// MARK: - RDS Inline
 
 private struct RDSInline: View {
     @EnvironmentObject var radio: RadioState
+    @EnvironmentObject var theme: ThemeStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("RDS")
-                    .font(.caption2.weight(.semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if !radio.rdsStation.isEmpty {
+                    Text(radio.rdsStation)
+                        .font(.subheadline.monospaced().weight(.semibold))
+                        .foregroundStyle(theme.current.accentColor)
+                }
+                if !radio.rdsPTY.isEmpty {
+                    Text(radio.rdsPTY)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .glassEffect(.regular, in: .capsule)
+                }
                 Spacer()
                 if !radio.rdsTime.isEmpty {
                     Text(radio.rdsTime)
@@ -191,51 +194,14 @@ private struct RDSInline: View {
                 }
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if !radio.rdsStation.isEmpty {
-                    Text(radio.rdsStation)
-                        .font(.title3.monospaced().weight(.semibold))
-                        .foregroundStyle(.accent)
-                }
-                if !radio.rdsPTY.isEmpty {
-                    Text(radio.rdsPTY)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .glassEffect(.regular, in: .capsule)
-                }
-            }
-
             if !radio.rdsText.isEmpty {
                 Text(radio.rdsText)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.primary.opacity(0.85))
                     .lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-// MARK: - Info Chip
-
-struct InfoChip: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.monospaced().weight(.medium))
-                .foregroundStyle(.primary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .glassEffect(.regular, in: .capsule)
     }
 }
 
