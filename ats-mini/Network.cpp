@@ -726,3 +726,20 @@ const String webConfigPage()
 "</FORM>"
 );
 }
+
+//
+// Save WiFi credentials from the on-device menu.
+// Stores SSID and password in the first network slot (clearing slots 2 & 3)
+// so wifiConnect() will use them on the next netInit(NET_CONNECT) call.
+//
+void wifiSaveCredentials(const String& ssid, const String& password)
+{
+  prefs.begin("network", false, STORAGE_PARTITION);
+  prefs.putString("wifissid1", ssid);
+  prefs.putString("wifipass1", password);
+  prefs.putString("wifissid2", "");
+  prefs.putString("wifipass2", "");
+  prefs.putString("wifissid3", "");
+  prefs.putString("wifipass3", "");
+  prefs.end();
+}
