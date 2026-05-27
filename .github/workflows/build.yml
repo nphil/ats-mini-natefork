@@ -267,8 +267,15 @@ jobs:
           REPO='${{ github.repository }}'
           TITLE="Latest Build (${{ needs.build.outputs.slug }})"
 
-          # Check if 'latest' release already exists
-          RELEASE_ID=$(gh api "repos/${REPO}/releases/tags/latest" --jq '.id' 2>/dev/null || echo "")
+          # Check if 'latest' release already exists.
+          # gh api outputs the raw JSON body to stdout even on 4xx errors, so
+          # using --jq '.id' on a 404 response sets RELEASE_ID to the full JSON
+          # blob rather than empty string.  Guard by only extracting .id when
+          # the API call actually succeeds (exit 0).
+          RELEASE_ID=""
+          if RELEASE_JSON=$(gh api "repos/${REPO}/releases/tags/latest" 2>/dev/null); then
+            RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id')
+          fi
 
           if [ -n "$RELEASE_ID" ]; then
             # Delete old assets (filenames change with each slug so they accumulate)
