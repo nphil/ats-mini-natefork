@@ -17,6 +17,22 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "3.1.0",
+          "buildVersion": "4",
+          "date": "2026-05-27T03:14:39Z",
+          "localizedDescription": "## ATS-Mini Remote 3.1.0 — Theming + single-screen Radio\n\nBuilds on the 3.0.0 navigation refresh by porting the full HomeBoy theme system, consolidating the Radio tab onto a single screen with no scroll, and fixing the toolbar Bluetooth pill.\n\n### Theming\n- **30 color themes** ported from the Homebox / HomeBoy palette: Homebox, Light, Dark, Forest, Garden, Emerald, Aqua, Ocean, Night, Dracula, Synthwave, Halloween, Coffee, Business, Luxury, Black, Cupcake, Valentine, Pastel, Fantasy, Retro, Bumblebee, Lemonade, Corporate, CMYK, Autumn, Winter, Acid, Cyberpunk, Wireframe, Lo-Fi\n- Solid backgrounds (no gradients), HSL-driven, persisted across launches\n- Light / dark color scheme follows the active theme's background lightness automatically\n- Theme picker in **Settings → Appearance** with circular swatches in a 4-column grid\n\n### Radio screen — fits one screen, no scroll\n- Removed the duplicate Band / Mode / Step / BW chip row from the Frequency card\n- Controls replaces 5 stacked +/− rows with a wrap-flowing row of compact popup-menu pills (Band, Mode, Step, BW, AGC). Each pill shows the current value and tap exposes Next / Previous\n- Signal card collapsed: RSSI / SNR / Battery as a single row of mini meters, CPU 0 / CPU 1 / Seq on a thin pill row underneath\n- Inline navigation titles throughout — reclaims vertical space\n\n### Toolbar Bluetooth pill\n- Replaced the tiny-dot pill with a 34pt circular button using a recognizable BLE icon, theme-tinted, with a soft pulsing ring while connected.\n\n### Settings\n- New **Appearance** section above Firmware\n- New **About** section with version, build, GitHub link",
+          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/ios-v3.1.0/ATSMini.ipa",
+          "size": 486557
+        },
+        {
+          "version": "3.0.0",
+          "buildVersion": "3",
+          "date": "2026-05-26T03:25:26Z",
+          "localizedDescription": "## ATS-Mini Remote 3.0.0 — Major UI/UX refresh\n\nA ground-up redesign of the iOS app navigation and interaction model.\n\n### Navigation\n- Reduced from 5 tabs to 3: **Radio · Visualize · Settings**\n- **Log** moved from a tab to a toolbar sheet (top-right of Radio tab) with a Clear action\n- **Spectrum + Waterfall** merged into a single **Visualize** tab with a segmented picker\n\n### Connection\n- Connection status moved from a full card to a compact pill in the navigation bar\n- Device picker sheet redesigned with Connected / Available sections\n\n### Radio screen\n- RDS data (station, PTY, scroll text) appears **inline** under the frequency display when on FM\n- Improved seek / tune button feedback\n\n### Signal & Status\n- Removed redundant RSSI/SNR/Seq stat boxes\n- CPU usage shown as compact side-by-side gradient meters\n- Battery icon dynamically reflects charge level\n\n### Haptics throughout\n- Medium impact: tune, scan, save, load, Sleep\n- Light impact: delta +/− controls, zoom, volume change\n\n### Empty states\n- Spectrum / Waterfall / Log / Presets show friendly empty states",
+          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/ios-v3.0.0/ATSMini.ipa",
+          "size": 451183
+        },
+        {
           "version": "2.1.0",
           "buildVersion": "2",
           "date": "2026-05-24T16:12:27Z",
