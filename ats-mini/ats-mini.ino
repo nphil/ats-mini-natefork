@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include <Wire.h>
+#include <esp_ota_ops.h>
 #include "Rotary.h"
 #include "Button.h"
 #include "Menu.h"
@@ -14,6 +15,7 @@
 #include "EIBI.h"
 #include "Remote.h"
 #include "Ble.h"
+#include "Recovery.h"
 
 // SI473/5 and UI
 #define MIN_ELAPSED_TIME         5  // 300
@@ -115,6 +117,10 @@ NordicUART BLESerial = NordicUART(RECEIVER_NAME);
 //
 void setup()
 {
+  // Recovery mode: if encoder is held at power-on for >1 s, enter the
+  // WiFi-OTA recovery UI and never return to normal boot.
+  checkRecoveryBoot();
+
   // Enable serial port
   Serial.begin(115200);
 
@@ -296,6 +302,11 @@ void setup()
 
   // Start low-priority idle-counter tasks for CPU load estimation
   cpuInitTasks();
+
+  // Mark this firmware as valid so the bootloader doesn't roll back to the
+  // previous OTA slot. Called here — after all hardware init succeeds — so
+  // a crash earlier in setup() on the next boot triggers the rollback.
+  esp_ota_mark_app_valid_cancel_rollback();
 }
 
 

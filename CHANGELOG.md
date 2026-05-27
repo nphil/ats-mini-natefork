@@ -4,6 +4,13 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.40 (2026-05-27)
+
+### Added
+
+- **Recovery mode.** Hold the encoder button while powering on (keep it held for 1 second). The device skips normal boot and enters a self-contained recovery UI: it creates a WiFi access point named `ATS-Mini Recovery` (password `atsrecover`), and once you connect a phone or PC you can visit `http://192.168.4.1` to upload a fresh `*-ospi-ota.bin` firmware file via a browser — no drivers, no esptool, no USB cable required. The recovery code cannot overwrite itself (OTA always targets the inactive slot).
+- **OTA rollback guard.** The firmware now calls `esp_ota_mark_app_valid_cancel_rollback()` after all hardware (display, SI4732, WiFi, BLE) initialises successfully. If the app crashes before that point on a future boot, the ESP-IDF bootloader automatically rolls back to the previous working firmware on the next restart.
+
 ## 2.38 (2026-05-27)
 
 ### Changed
