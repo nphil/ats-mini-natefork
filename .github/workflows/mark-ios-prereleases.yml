@@ -1,0 +1,42 @@
+name: Mark iOS releases as pre-releases
+
+# One-time migration: flip all existing ios-v* full releases to pre-releases
+# so that the firmware v*.** release reclaims the "Latest" badge on the
+# Releases page.  Run once manually from the Actions tab; safe to re-run.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mark-prereleases:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark all ios-v* releases as pre-releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Fetching all releases..."
+          PAGE=1
+          UPDATED=0
+          while true; do
+            RELEASES=$(gh api "repos/${REPO}/releases?per_page=100&page=${PAGE}" 2>/dev/null)
+            COUNT=$(echo "$RELEASES" | jq 'length')
+            if [ "$COUNT" -eq 0 ]; then break; fi
+
+            echo "$RELEASES" | jq -c '.[] | select(.tag_name | startswith("ios-v")) | select(.prerelease == false) | {id, tag_name}' \
+            | while read -r item; do
+              ID=$(echo "$item"   | jq -r '.id')
+              TAG=$(echo "$item"  | jq -r '.tag_name')
+              echo "  Marking ${TAG} (id=${ID}) as pre-release..."
+              gh api -X PATCH "repos/${REPO}/releases/${ID}" \
+                -F prerelease=true --silent
+              UPDATED=$((UPDATED + 1))
+            done
+
+            PAGE=$((PAGE + 1))
+          done
+          echo "Done."

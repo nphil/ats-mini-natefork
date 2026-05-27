@@ -166,5 +166,6 @@ jobs:
 
           gh release create "$TAG" \
             ATSMini.ipa \
+            --prerelease \
             --title "ATS-Mini Remote ${VERSION}" \
             --notes-file release-notes.md
