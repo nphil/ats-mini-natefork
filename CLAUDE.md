@@ -12,16 +12,13 @@ set them up proactively before shipping.
 
 ## Workflow preferences
 
-- **Always push to BOTH branches** so changes land on `main` immediately
-  without a manual PR merge:
+- **Push directly to `main`** — no separate dev branch needed:
   ```
-  git push origin HEAD:main && git push origin claude/<slug>-<id>
+  git push origin HEAD:main
   ```
   CI conflict recovery (CI auto-bumps version after every push):
   ```
-  git fetch origin main && git rebase origin/main \
-    && git push origin HEAD:main \
-    && git push origin claude/<slug>-<id> --force-with-lease
+  git fetch origin main && git rebase origin/main && git push origin HEAD:main
   ```
 - **Releases are fully automatic.** Every push to `main` triggers
   `ios.yml`, which auto-increments the patch version in `ios/project.yml`,
@@ -85,5 +82,4 @@ set them up proactively before shipping.
 
 ## Branches
 
-- Develop on the per-task branch the system specifies (`claude/<slug>-<id>`).
-- Push to **both** `main` and the dev branch on every commit (see above).
+- Push all changes directly to `main`. No dev branch needed.

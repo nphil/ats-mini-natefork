@@ -169,3 +169,14 @@ jobs:
             --prerelease \
             --title "ATS-Mini Remote ${VERSION}" \
             --notes-file release-notes.md
+
+          # Also attach IPA to the latest versioned firmware release so it
+          # shows up alongside the firmware binary in one download.
+          FW_RELEASE=$(gh api "repos/${{ github.repository }}/releases?per_page=20" \
+            --jq '[.[] | select(.prerelease == false) | select(.tag_name | test("^v[0-9]"))] | first | .tag_name' \
+            2>/dev/null || true)
+          if [ -n "$FW_RELEASE" ] && [ "$FW_RELEASE" != "null" ]; then
+            gh release upload "$FW_RELEASE" ATSMini.ipa \
+              --repo "${{ github.repository }}" --clobber
+            echo "IPA also attached to firmware release $FW_RELEASE"
+          fi

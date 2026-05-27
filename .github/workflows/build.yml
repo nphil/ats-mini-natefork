@@ -424,3 +424,20 @@ jobs:
             --title "${TAG}" \
             --notes-file fw-release-notes.md \
             release/*.zip release/*-flash.bin
+
+      - name: Attach latest iOS IPA to this firmware release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO='${{ github.repository }}'
+          IOS_IPA_URL=$(gh api "repos/${REPO}/releases?per_page=20" \
+            --jq '[.[] | select(.tag_name | startswith("ios-v"))] | first | .assets[] | select(.name == "ATSMini.ipa") | .browser_download_url' \
+            2>/dev/null || true)
+          if [ -n "$IOS_IPA_URL" ] && [ "$IOS_IPA_URL" != "null" ]; then
+            echo "Downloading IPA from: $IOS_IPA_URL"
+            curl -fsSL -o ATSMini.ipa "$IOS_IPA_URL"
+            gh release upload "${TAG}" ATSMini.ipa --repo "${REPO}" --clobber
+            echo "IPA attached to ${TAG}"
+          else
+            echo "No iOS IPA found — skipping"
+          fi
