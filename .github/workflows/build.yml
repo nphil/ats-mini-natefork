@@ -185,8 +185,11 @@ jobs:
           pattern: 'ats-mini-*'
           merge-multiple: true
           path: artifact
-      - name: Collect flash binary
-        run: find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
+      - name: Collect release binaries
+        run: |
+          find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
+          find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
+            -exec cp {} "ats-mini-${{ needs.build.outputs.slug }}-ospi-ota.bin" \;
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -199,7 +202,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           SLUG: ${{ needs.build.outputs.slug }}
         run: |
-          gh release upload "$SLUG" ./*-ospi-flash.bin --repo '${{ github.repository }}' --clobber
+          gh release upload "$SLUG" ./*-ospi-flash.bin ./*-ospi-ota.bin --repo '${{ github.repository }}' --clobber
 
   latest-release:
     # Overwrites the rolling "latest" release on every push to main so the
@@ -226,8 +229,11 @@ jobs:
           merge-multiple: true
           path: artifact
 
-      - name: Collect flash binary
-        run: find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
+      - name: Collect release binaries
+        run: |
+          find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
+          find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
+            -exec cp {} "ats-mini-${{ needs.build.outputs.slug }}-ospi-ota.bin" \;
 
       - name: Write release notes
         run: |
@@ -316,7 +322,7 @@ jobs:
           fi
 
           # Upload new assets (--clobber handles any same-name leftovers)
-          gh release upload latest --repo "${REPO}" --clobber ./*-ospi-flash.bin
+          gh release upload latest --repo "${REPO}" --clobber ./*-ospi-flash.bin ./*-ospi-ota.bin
 
   firmware-auto-release:
     # Auto-bumps VER_APP and publishes a versioned firmware release on every
@@ -359,11 +365,15 @@ jobs:
           merge-multiple: true
           path: artifact
 
-      - name: Collect flash binary with clean version name
+      - name: Collect release binaries with clean version names
         run: |
           mkdir -p release
+          # Merged binary for esptool (flash at 0x0)
           find artifact -name '*-ospi-flash.bin' -exec \
             cp {} "release/ats-mini-${TAG}-ospi-flash.bin" \;
+          # Raw app binary for web OTA upload
+          find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' -exec \
+            cp {} "release/ats-mini-${TAG}-ospi-ota.bin" \;
 
       - name: Extract changelog section
         run: |
@@ -411,7 +421,8 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "${TAG}" \
             --notes-file fw-release-notes.md \
-            release/*-ospi-flash.bin
+            release/*-ospi-flash.bin \
+            release/*-ospi-ota.bin
 
       - name: Attach latest iOS IPA to this firmware release
         env:
