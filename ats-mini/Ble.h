@@ -2,7 +2,8 @@
 #define BLE_H
 
 #include <NimBLEDevice.h>
-#include <semaphore>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include "Remote.h"
 
@@ -21,9 +22,9 @@ private:
 
   bool started;
 
-  std::binary_semaphore dataConsumed{1};
-  std::string           incomingData;
-  size_t                unreadByteCount;
+  SemaphoreHandle_t dataConsumed;
+  std::string       incomingData;
+  size_t            unreadByteCount;
 
   const char* deviceName;
 
@@ -38,7 +39,7 @@ private:
     // If stop() is mid-teardown bail out; touching a torn-down server or
     // releasing the semaphore twice is UB.
     if (!started) return;
-    dataConsumed.release();
+    xSemaphoreGive(dataConsumed);
     NimBLEDevice::getAdvertising()->start();
   }
 
@@ -46,7 +47,7 @@ private:
 
   void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& info) override {
     if (pChar != pRxCharacteristic) return;
-    dataConsumed.acquire();
+    xSemaphoreTake(dataConsumed, portMAX_DELAY);
     const auto& val = pChar->getValue();
     incomingData    = std::string(reinterpret_cast<const char*>(val.data()), val.size());
     unreadByteCount = incomingData.size();
@@ -56,10 +57,13 @@ public:
   explicit NordicUART(const char* name)
       : deviceName(name), pServer(nullptr), pService(nullptr),
         pTxCharacteristic(nullptr), pRxCharacteristic(nullptr),
-        started(false), unreadByteCount(0) {}
+        started(false), dataConsumed(nullptr), unreadByteCount(0) {}
 
   void start()
   {
+    dataConsumed = xSemaphoreCreateBinary();
+    xSemaphoreGive(dataConsumed);  // start in "available" state (mirrors binary_semaphore{1})
+
     NimBLEDevice::init(deviceName);
     NimBLEDevice::setPower(3);   // 3 dBm
     NimBLEDevice::setMTU(517);
@@ -111,6 +115,8 @@ public:
     pService          = nullptr;
     pTxCharacteristic = nullptr;
     pRxCharacteristic = nullptr;
+
+    if (dataConsumed) { vSemaphoreDelete(dataConsumed); dataConsumed = nullptr; }
   }
 
   bool isStarted() { return started; }
@@ -128,7 +134,7 @@ public:
     if (unreadByteCount == 0) return -1;
     int ch = (uint8_t)incomingData[incomingData.size() - unreadByteCount];
     if (--unreadByteCount == 0)
-      dataConsumed.release();
+      xSemaphoreGive(dataConsumed);
     return ch;
   }
 
