@@ -1,4 +1,4 @@
-## ATS-Mini Remote 3.2.0 — Silent auto-reconnect
+## ATS-Mini Remote 3.2 — Silent auto-reconnect
 
 The app now remembers the last ATS-Mini you connected to and quietly reconnects whenever it comes back online — no more manually tapping the Bluetooth pill after the radio sleeps, reboots, or finishes its 5-minute BLE auto-off cycle.
 
