@@ -183,3 +183,78 @@ jobs:
               --notes "$NOTES" || true
             gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
           fi
+
+      # Patch apps.json (Feather/AltStore manifest) in-band. We can't rely on
+      # the `release: published` event here: releases created by a workflow
+      # using GITHUB_TOKEN do NOT fire downstream workflows (GitHub
+      # suppresses this to prevent infinite loops). Running the manifest
+      # update in the same job that created the release sidesteps that
+      # restriction entirely.
+      - name: Update Feather repo (apps.json)
+        if: steps.tag.outputs.kind == 'ios'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Operate on a fresh checkout of main — the workflow might be running
+          # on a tagged commit that isn't on main yet, but apps.json always
+          # lives on main.
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B feather-update origin/main
+
+          python3 - << 'PYEOF'
+          import json, os, re, subprocess
+
+          tag  = os.environ['TAG_NAME']
+          repo = os.environ['GITHUB_REPOSITORY']
+          m = re.match(r'^(?:ios-)?v(.+)$', tag)
+          version = m.group(1) if m else tag
+
+          meta = json.loads(subprocess.check_output([
+              'gh', 'release', 'view', tag, '--repo', repo,
+              '--json', 'tagName,publishedAt,body,assets'
+          ]))
+          date = meta['publishedAt']
+          body = meta.get('body', '') or ''
+          ipa = next((a for a in meta.get('assets', []) if a['name'].endswith('.ipa')), None)
+          if not ipa:
+              print(f"No IPA asset on {tag}; skipping apps.json update.")
+              raise SystemExit(0)
+
+          url  = f"https://github.com/{repo}/releases/download/{tag}/{ipa['name']}"
+          size = ipa['size']
+
+          with open('apps.json') as f:
+              data = json.load(f)
+
+          app = data['apps'][0]
+          app['versions'] = [v for v in app['versions']
+                             if v['version'] != version and v['version'] != 'latest']
+          app['versions'].insert(0, {
+              "version": version,
+              "buildVersion": version,
+              "date": date,
+              "localizedDescription": body,
+              "downloadURL": url,
+              "size": size,
+          })
+
+          with open('apps.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+
+          print(f"apps.json patched for {version}")
+          PYEOF
+
+          git add apps.json
+          if git diff --cached --quiet; then
+            echo "apps.json already up to date — nothing to commit."
+            exit 0
+          fi
+          # [skip ci] keeps this commit from re-triggering ios.yml on push.
+          git commit -m "Update Feather repo for ${TAG_NAME} [skip ci]"
+          git push origin HEAD:main
