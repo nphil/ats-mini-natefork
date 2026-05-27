@@ -276,7 +276,10 @@ void setup()
   // Connect WiFi, if necessary
   netInit(wifiModeIdx);
 
-  // Start Bluetooth LE, if necessary
+  // BLE always comes up at every boot regardless of what the user (or the
+  // auto-off timer) last left it as. The auto-off timer further down the
+  // main loop will switch it off after 5 min if nothing connects.
+  bleModeIdx = BLE_ADHOC;
   bleInit(bleModeIdx);
 
   // Start low-priority idle-counter tasks for CPU load estimation
@@ -952,8 +955,10 @@ void loop()
     elapsedSleep = elapsedCommand = currentTime = millis();
   }
 
-  // BLE auto-off: 5 minutes of no connection shuts it down.
-  // User can re-enable from Bluetooth menu.
+  // BLE auto-off: 5 minutes of no connection shuts it down at runtime, but
+  // the OFF state is NOT persisted — the next boot always brings BLE back up
+  // (see bleModeIdx = BLE_ADHOC override in setup()). User can also flip it
+  // back on mid-session from the Bluetooth menu.
   #define BLE_AUTO_OFF_MS 300000UL
   if(bleModeIdx == BLE_ADHOC)
   {
@@ -971,9 +976,9 @@ void loop()
       {
         bleStop();
         bleModeIdx = BLE_OFF;
-        prefsRequestSave(SAVE_SETTINGS);
         needRedraw    = true;
         bleAutoOffTimer = 0;
+        // Intentionally NOT prefsRequestSave — boot always restores BLE_ADHOC.
       }
     }
   }

@@ -1,0 +1,1 @@
+BLE now comes up automatically at every boot regardless of the last saved state. After 5 minutes with no client connection it switches off at runtime to save power, but the OFF state is never persisted — the next power-up always brings BLE back up. The user can still toggle it from the Bluetooth menu mid-session.
