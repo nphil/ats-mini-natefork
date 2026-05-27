@@ -10,7 +10,9 @@
 int8_t getBleStatus()
 {
   if(!BLESerial.isStarted()) return 0;
-  return BLEDevice::getServer()->getConnectedCount() > 0 ? 1 : -1;
+  NimBLEServer* srv = NimBLEDevice::getServer();
+  if(!srv) return 0;
+  return srv->getConnectedCount() > 0 ? 1 : -1;
 }
 
 //
@@ -38,7 +40,7 @@ int bleDoCommand(Stream* stream, RemoteState* state, uint8_t bleMode)
   // Guard against teardown races: isStarted() flips false before stop()
   // tears down the server, so check it before dereferencing getServer().
   if(!BLESerial.isStarted()) return 0;
-  BLEServer* srv = BLEDevice::getServer();
+  NimBLEServer* srv = NimBLEDevice::getServer();
   if(!srv || srv->getConnectedCount() == 0) return 0;
   if(!BLESerial.available()) return 0;
 
@@ -63,7 +65,7 @@ void remoteBLETickTime(Stream* stream, RemoteState* state, uint8_t bleMode)
   // Same teardown guard as bleDoCommand(): without this, the periodic status
   // tick can race with bleStop() and dereference a null/destroyed server.
   if(!BLESerial.isStarted()) return;
-  BLEServer* srv = BLEDevice::getServer();
+  NimBLEServer* srv = NimBLEDevice::getServer();
   if(!srv) return;
 
   if (srv->getConnectedCount() > 0)

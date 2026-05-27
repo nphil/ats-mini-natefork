@@ -4,6 +4,18 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.37 (2026-05-27)
+
+### Changed
+
+- **BLE now stays alive in CPU Sleep mode.** Previously, selecting `Settings → Sleep Mode → CPU Sleep` shut down the BLE stack and dropped any connected iOS app. The new implementation uses the ESP-IDF power-management framework (`esp_pm_configure()` with `light_sleep_enable = true`), which lets the FreeRTOS idle hook dip the CPU into light sleep between BLE/timer events automatically. An already-connected iOS app stays connected throughout sleep, and the device remains discoverable for new connections.
+- **Migrated BLE stack from legacy Bluedroid to NimBLE-Arduino 2.x.** Roughly halves the BLE memory footprint (~30 KB freed from internal SRAM) and uses less CPU during connection events. Behaviour and Nordic UART service UUIDs are unchanged — the iOS app needs no update.
+- CPU Sleep now respects the user-selected `Settings → CPU Freq` ceiling: the PM framework uses the chosen freq (80/160/240 MHz) as the max and 40 MHz as the min. Picking 240 MHz no longer disables effective sleep — the CPU still scales down to 40 MHz when idle.
+
+### Removed
+
+- The blocking `esp_light_sleep_start()` loop in `sleepOn()`. Replaced with PM-based automatic light sleep that wakes for BLE events.
+
 ## 2.36 (2026-05-27)
 
 Best paired with **ATS-Mini Remote iOS app v3.2.x** which now reads the radio's IP/AP/version over BLE and offers one-tap WiFi OTA flashing from the GitHub releases list.

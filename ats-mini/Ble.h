@@ -1,11 +1,7 @@
 #ifndef BLE_H
 #define BLE_H
 
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
-#include "host/ble_gap.h"
+#include <NimBLEDevice.h>
 #include <semaphore>
 
 #include "Remote.h"
@@ -14,263 +10,177 @@
 #define NORDIC_UART_CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define NORDIC_UART_CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
-class NordicUART : public Stream, public BLEServerCallbacks, public BLECharacteristicCallbacks {
+class NordicUART : public Stream,
+                   private NimBLEServerCallbacks,
+                   private NimBLECharacteristicCallbacks {
 private:
-  // BLE components
-  BLEServer* pServer;
-  BLEService* pService;
-  BLECharacteristic* pTxCharacteristic;
-  BLECharacteristic* pRxCharacteristic;
+  NimBLEServer*         pServer;
+  NimBLEService*        pService;
+  NimBLECharacteristic* pTxCharacteristic;
+  NimBLECharacteristic* pRxCharacteristic;
 
-  // Connection management
   bool started;
 
-  // Data handling
   std::binary_semaphore dataConsumed{1};
-  String incomingPacket;
-  size_t unreadByteCount = 0;
+  std::string           incomingData;
+  size_t                unreadByteCount;
 
-  // Device attributes
-  const char *deviceName;
+  const char* deviceName;
+
+  // ── Server callbacks ──────────────────────────────────────────────────────
+
+  void onConnect(NimBLEServer* srv, NimBLEConnInfo& info) override {
+    // Tighten connection interval: 7.5–15 ms, no slave latency, 2 s timeout
+    srv->updateConnParams(info.getConnHandle(), 6, 12, 0, 200);
+  }
+
+  void onDisconnect(NimBLEServer* srv, NimBLEConnInfo& info, int reason) override {
+    // If stop() is mid-teardown bail out; touching a torn-down server or
+    // releasing the semaphore twice is UB.
+    if (!started) return;
+    dataConsumed.release();
+    NimBLEDevice::getAdvertising()->start();
+  }
+
+  // ── Characteristic callbacks ──────────────────────────────────────────────
+
+  void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& info) override {
+    if (pChar != pRxCharacteristic) return;
+    dataConsumed.acquire();
+    const auto& val = pChar->getValue();
+    incomingData    = std::string(reinterpret_cast<const char*>(val.data()), val.size());
+    unreadByteCount = incomingData.size();
+  }
 
 public:
-  NordicUART(const char *name) : deviceName(name) {
-    started = false;
-    pServer = nullptr;
-    pService = nullptr;
-    pTxCharacteristic = nullptr;
-    pRxCharacteristic = nullptr;
-  }
+  explicit NordicUART(const char* name)
+      : deviceName(name), pServer(nullptr), pService(nullptr),
+        pTxCharacteristic(nullptr), pRxCharacteristic(nullptr),
+        started(false), unreadByteCount(0) {}
 
   void start()
   {
-    BLEDevice::init(deviceName);
-    BLEDevice::setPower(ESP_PWR_LVL_N0); // N12, N9, N6, N3, N0, P3, P6, P9
-    BLEDevice::getAdvertising()->setName(deviceName);
+    NimBLEDevice::init(deviceName);
+    NimBLEDevice::setPower(3);   // 3 dBm
+    NimBLEDevice::setMTU(517);
 
-    BLEDevice::setMTU(517);
-    ble_gap_set_prefered_default_le_phy(BLE_GAP_LE_PHY_ANY_MASK, BLE_GAP_LE_PHY_ANY_MASK);
-    ble_gap_write_sugg_def_data_len(251, (251 + 14) * 8);
+    pServer = NimBLEDevice::createServer();
+    pServer->setCallbacks(this);
 
-    pServer = BLEDevice::getServer();
-    if (pServer == nullptr)
-      pServer = BLEDevice::createServer();
-
-    pServer->setCallbacks(this); // onConnect/onDisconnect
-    pServer->getAdvertising()->addServiceUUID(NORDIC_UART_SERVICE_UUID);
     pService = pServer->createService(NORDIC_UART_SERVICE_UUID);
-    pTxCharacteristic = pService->createCharacteristic(NORDIC_UART_CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);
-    pTxCharacteristic->setCallbacks(this); // onSubscribe/onStatus
-    pRxCharacteristic = pService->createCharacteristic(NORDIC_UART_CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE);
-    pRxCharacteristic->setCallbacks(this); // onWrite
+
+    pTxCharacteristic = pService->createCharacteristic(
+        NORDIC_UART_CHARACTERISTIC_UUID_TX,
+        NIMBLE_PROPERTY::NOTIFY);
+
+    pRxCharacteristic = pService->createCharacteristic(
+        NORDIC_UART_CHARACTERISTIC_UUID_RX,
+        NIMBLE_PROPERTY::WRITE);
+    pRxCharacteristic->setCallbacks(this);
+
     pService->start();
-    pServer->getAdvertising()->start();
+
+    NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
+    pAdv->addServiceUUID(NORDIC_UART_SERVICE_UUID);
+    pAdv->start();
+
     started = true;
   }
 
   void stop()
   {
-    // Critical: set this *first* so any onDisconnect callback that fires
-    // mid-teardown bails out instead of touching torn-down state. Previously
-    // the disconnect that BLEDevice::deinit() generates would re-enter
-    // pServer->getAdvertising()->start() on an already-destroyed server,
-    // and call dataConsumed.release() a second time (binary_semaphore
-    // overflow → UB) — that's the crash users hit when BLE was connected
-    // and the radio entered light sleep.
+    // Set started = false first so any in-flight callbacks bail out before
+    // we tear down GATT state (avoids semaphore double-release / UB).
     if (!started) return;
     started = false;
 
-    pServer = BLEDevice::getServer();
-    if (pServer)
-    {
-      // Stop advertising and gracefully disconnect any active clients before
-      // tearing down the GATT structures.
-      pServer->getAdvertising()->stop();
+    NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
+    if (pAdv) pAdv->stop();
 
-      if (pServer->getConnectedCount() > 0)
-      {
-        // Walk every active connection and request a clean disconnect.
-        auto peerInfo = pServer->getPeerDevices(true);
-        for (auto& p : peerInfo) pServer->disconnect(p.first);
-        // Give the host task a beat to process disconnect events so they
-        // don't race with the service/characteristic teardown below.
-        delay(50);
+    if (pServer && pServer->getConnectedCount() > 0) {
+      size_t n = pServer->getConnectedCount();
+      for (size_t i = 0; i < n; i++) {
+        NimBLEConnInfo info = pServer->getPeerInfo(0);
+        pServer->disconnect(info.getConnHandle());
       }
-
-      if (pService)
-      {
-        pService->stop();
-
-        if (pRxCharacteristic)
-        {
-          pService->removeCharacteristic(pRxCharacteristic, true);
-          pRxCharacteristic = nullptr;
-        }
-        if (pTxCharacteristic)
-        {
-          pService->removeCharacteristic(pTxCharacteristic, true);
-          pTxCharacteristic = nullptr;
-        }
-
-        pServer->removeService(pService);
-        pService = nullptr;
-      }
+      delay(50);
     }
-    BLEDevice::deinit(false);
+
+    NimBLEDevice::deinit(false);
+    pServer           = nullptr;
+    pService          = nullptr;
+    pTxCharacteristic = nullptr;
+    pRxCharacteristic = nullptr;
   }
 
-  bool isStarted()
+  bool isStarted() { return started; }
+
+  // ── Stream interface ──────────────────────────────────────────────────────
+
+  int available() override { return (int)unreadByteCount; }
+
+  int peek() override {
+    if (unreadByteCount == 0) return -1;
+    return (uint8_t)incomingData[incomingData.size() - unreadByteCount];
+  }
+
+  int read() override {
+    if (unreadByteCount == 0) return -1;
+    int ch = (uint8_t)incomingData[incomingData.size() - unreadByteCount];
+    if (--unreadByteCount == 0)
+      dataConsumed.release();
+    return ch;
+  }
+
+  size_t write(const uint8_t* data, size_t size) override
   {
-    return started;
-  }
-
-  void onConnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
-    ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_ANY_MASK, BLE_GAP_LE_PHY_ANY_MASK, BLE_GAP_LE_PHY_CODED_ANY);
-    ble_gap_set_data_len(desc->conn_handle, 251, (251 + 14) * 8);
-    pServer->updateConnParams(desc->conn_handle, 6, 12, 0, 200);
-  }
-
-  void onDisconnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
-    // If stop() is mid-teardown, skip everything. Touching the semaphore
-    // (release-after-release is UB) or restarting advertising on a server
-    // that's being deinitialised was the source of the sleep-time crash.
-    if (!started) return;
-    dataConsumed.release();
-    pServer->getAdvertising()->start();
-  }
-
-  // FIXME https://github.com/espressif/arduino-esp32/issues/11805
-  void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc)
-  {
-    if(pCharacteristic == pRxCharacteristic)
-    {
-      // Wait for previous data to get consumed
-      dataConsumed.acquire();
-
-      // Hold data until next read
-      incomingPacket = pCharacteristic->getValue();
-      unreadByteCount = incomingPacket.length();
+    if (!pTxCharacteristic || size == 0) return 0;
+    // ATT notification payload = MTU - 3 (ATT header)
+    size_t mtu       = NimBLEDevice::getMTU();
+    size_t chunkSize = mtu > 3 ? mtu - 3 : 20;
+    size_t remaining = size;
+    while (remaining > 0) {
+      delay(20);
+      size_t n = remaining > chunkSize ? chunkSize : remaining;
+      pTxCharacteristic->setValue(data, n);
+      pTxCharacteristic->notify();
+      data      += n;
+      remaining -= n;
     }
+    return size;
   }
 
-  void onStatus(BLECharacteristic *pCharacteristic, Status s, uint32_t code)
+  size_t write(uint8_t byte) override { return write(&byte, 1); }
+
+  size_t print(const std::string& str)
   {
-    // if(code) Serial.println(code);
+    return write(reinterpret_cast<const uint8_t*>(str.data()), str.size());
   }
 
-  int available()
-  {
-    return unreadByteCount;
-  }
-
-  int peek()
-  {
-    if (unreadByteCount > 0)
-    {
-        size_t index = incomingPacket.length() - unreadByteCount;
-        return incomingPacket[index];
-    }
-    return -1;
-  }
-
-  int read()
-  {
-    if (unreadByteCount > 0)
-    {
-      size_t index = incomingPacket.length() - unreadByteCount;
-      int result = incomingPacket[index];
-      unreadByteCount--;
-      if (unreadByteCount == 0)
-        dataConsumed.release();
-      return result;
-    }
-    return -1;
-  }
-
-  // It is hard to achieve max throughput witout using delays...
-  //
-  // https://github.com/nkolban/esp32-snippets/issues/773
-  // https://github.com/espressif/arduino-esp32/issues/8413
-  // https://github.com/espressif/esp-idf/issues/9097
-  // https://github.com/espressif/esp-idf/issues/16889
-  // https://github.com/espressif/esp-nimble/issues/75
-  // https://github.com/espressif/esp-nimble/issues/106
-  // https://github.com/h2zero/esp-nimble-cpp/issues/347
-  size_t write(const uint8_t *data, size_t size)
-  {
-    if (pTxCharacteristic)
-    {
-      // Data is sent in chunks of MTU size to avoid data loss
-      // as each chunk is notified separately
-      size_t chunkSize = BLEDevice::getMTU();
-      size_t remainingByteCount = size;
-      while (remainingByteCount >= chunkSize)
-      {
-        delay(20);
-        pTxCharacteristic->setValue(data, chunkSize);
-        pTxCharacteristic->notify();
-        data += chunkSize;
-        remainingByteCount -= chunkSize;
-      }
-      if (remainingByteCount > 0)
-      {
-        delay(20);
-        pTxCharacteristic->setValue(data, remainingByteCount);
-        pTxCharacteristic->notify();
-      }
-      return size;
-    }
-    else
-      return 0;
-  }
-
-  size_t write(uint8_t byte)
-  {
-    return write(&byte, 1);
-  }
-
-  size_t print(std::string str)
-  {
-    return write((const uint8_t *)str.data(), str.length());
-  }
-
-  size_t printf(const char *format, ...)
+  size_t printf(const char* format, ...)
   {
     char dummy;
     va_list args;
     va_start(args, format);
-    int requiredSize = vsnprintf(&dummy, 1, format, args);
+    int needed = vsnprintf(&dummy, 1, format, args);
     va_end(args);
-    if (requiredSize == 0)
-    {
-      return write((uint8_t *)&dummy, 1);
-    }
-    else if (requiredSize > 0)
-    {
-      char *buffer = (char *)malloc(requiredSize + 1);
-      if (buffer)
-      {
-        va_start(args, format);
-        int result = vsnprintf(buffer, requiredSize + 1, format, args);
-        va_end(args);
-        if ((result >= 0) && (result <= requiredSize))
-        {
-          size_t writtenBytesCount = write((uint8_t *)buffer, result + 1);
-          free(buffer);
-          return writtenBytesCount;
-        }
-        free(buffer);
-      }
-    }
-    return 0;
+    if (needed <= 0) return 0;
+    char* buf = static_cast<char*>(malloc(needed + 1));
+    if (!buf) return 0;
+    va_start(args, format);
+    vsnprintf(buf, needed + 1, format, args);
+    va_end(args);
+    size_t written = write(reinterpret_cast<const uint8_t*>(buf), needed);
+    free(buf);
+    return written;
   }
 };
 
-void bleInit(uint8_t bleMode);
-void bleStop();
-int8_t getBleStatus();
-void remoteBLETickTime(Stream* stream, RemoteState* state, uint8_t bleMode);
-int bleDoCommand(Stream* stream, RemoteState* state, uint8_t bleMode);
+void     bleInit(uint8_t bleMode);
+void     bleStop();
+int8_t   getBleStatus();
+void     remoteBLETickTime(Stream* stream, RemoteState* state, uint8_t bleMode);
+int      bleDoCommand(Stream* stream, RemoteState* state, uint8_t bleMode);
 extern NordicUART BLESerial;
 
-#endif
+#endif // BLE_H
