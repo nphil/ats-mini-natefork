@@ -3,258 +3,160 @@ name: Build iOS App
 on:
   push:
     branches: [main]
-    tags: ['v*', 'ios-v*']
   workflow_dispatch:
-    inputs:
-      version:
-        description: "iOS version to release (e.g. 3.0.0). Leave blank for a rolling 'latest' build."
-        required: false
-        type: string
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build unsigned IPA
-    runs-on: macos-15        # Xcode 16, required for iOS 26 target
+  release:
+    name: Build and release
+    runs-on: macos-15
+
+    env:
+      SCHEME:  ATSMini
+      PROJECT: ATSMini.xcodeproj
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from project.yml
+        id: ver
+        run: |
+          VERSION=$(grep -E '^\s+MARKETING_VERSION:' ios/project.yml \
+            | head -1 | awk '{print $2}' | tr -d '"')
+          TAG="ios-v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already released
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          if gh release view "${TAG}" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} already exists — nothing to release."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Select Xcode
+        if: steps.check.outputs.already != 'true'
         run: |
-          LATEST=$(find /Applications -maxdepth 1 -type d -name 'Xcode_*.app' 2>/dev/null | sort -V | tail -1)
-          if [ -z "$LATEST" ]; then
-            LATEST="/Applications/Xcode.app"
-          fi
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           echo "Using: $LATEST"
           sudo xcode-select -s "$LATEST"
           xcodebuild -version
 
-      - name: Install XcodeGen
+      - name: Install xcodegen
+        if: steps.check.outputs.already != 'true'
         run: brew install xcodegen
 
       - name: Generate Xcode project
+        if: steps.check.outputs.already != 'true'
         run: cd ios && xcodegen generate --spec project.yml
 
-      - name: Build (unsigned)
+      - name: Archive (unsigned)
+        if: steps.check.outputs.already != 'true'
         run: |
           set -o pipefail
-          xcodebuild build \
-            -project ios/ATSMini.xcodeproj \
-            -scheme ATSMini \
+          xcodebuild archive \
+            -project      "ios/${{ env.PROJECT }}" \
+            -scheme       "${{ env.SCHEME }}" \
             -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -destination  "generic/platform=iOS" \
+            -archivePath  "$RUNNER_TEMP/ATSMini.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE=""
+            SKIP_INSTALL=NO \
+            INSTALL_PATH="/Applications" \
+            | xcpretty || exit ${PIPESTATUS[0]}
 
       - name: Package IPA
+        if: steps.check.outputs.already != 'true'
         run: |
-          APP=$(find "$RUNNER_TEMP/DerivedData" -name "*.app" \
-            -not -path "*/Intermediates*" \
-            -not -path "*-Runner.app*" \
-            -maxdepth 8 | head -1)
+          APP=$(find "$RUNNER_TEMP/ATSMini.xcarchive" \
+            -name "*.app" ! -name "*.xctest" ! -path "*/SwiftSupport/*" \
+            2>/dev/null | head -1)
           if [ -z "$APP" ]; then
-            echo "❌ .app not found. Listing derived data:"
-            find "$RUNNER_TEMP/DerivedData" -maxdepth 6 2>/dev/null || echo "(DerivedData missing entirely)"
+            echo "❌ .app not found in archive:"
+            find "$RUNNER_TEMP/ATSMini.xcarchive" -maxdepth 6 2>/dev/null || echo "(archive missing)"
             exit 1
           fi
-          echo "✅ Found app at: $APP"
-          mkdir -p Payload
-          cp -r "$APP" Payload/
+          echo "✅ Found: $APP"
+          mkdir -p Payload && cp -r "$APP" Payload/
           zip -r ATSMini.ipa Payload/
-          echo "IPA size: $(du -sh ATSMini.ipa | cut -f1)"
+          echo "IPA: $(du -sh ATSMini.ipa | cut -f1)"
 
-      - name: Determine release tag
-        id: tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          REF="$GITHUB_REF"
-          REPO="${{ github.repository }}"
-
-          emit_ios () {
-            local v="$1"
-            {
-              echo "tag=ios-v${v}"
-              echo "prerelease=false"
-              echo "title=ATS-Mini Remote ${v}"
-              echo "kind=ios"
-            } >> "$GITHUB_OUTPUT"
-          }
-
-          emit_rolling () {
-            {
-              echo "tag=latest"
-              echo "prerelease=true"
-              echo "title=Latest build"
-              echo "kind=rolling"
-            } >> "$GITHUB_OUTPUT"
-          }
-
-          # 1. Manual workflow_dispatch with explicit version → versioned release
-          if [ -n "${INPUT_VERSION:-}" ]; then
-            emit_ios "$INPUT_VERSION"
-
-          # 2. iOS tag push → versioned release
-          elif [[ "$REF" == refs/tags/ios-v* ]]; then
-            VER="${REF#refs/tags/ios-v}"
-            emit_ios "$VER"
-
-          # 3. Firmware tag push → attach IPA to firmware release
-          elif [[ "$REF" == refs/tags/v* ]]; then
-            VER="${REF#refs/tags/}"
-            {
-              echo "tag=${VER}"
-              echo "prerelease=false"
-              echo "title=${VER}"
-              echo "kind=firmware"
-            } >> "$GITHUB_OUTPUT"
-
-          # 4. Main branch push → auto-release if project.yml has a new version
-          elif [[ "$REF" == refs/heads/main ]]; then
-            PROJECT_VER=$(grep -E '^\s+MARKETING_VERSION:' ios/project.yml \
-              | head -1 | awk '{print $2}' | tr -d '"')
-            if [ -n "$PROJECT_VER" ] \
-              && ! gh release view "ios-v${PROJECT_VER}" --repo "$REPO" >/dev/null 2>&1; then
-              echo "Detected new iOS version in project.yml: ${PROJECT_VER}"
-              emit_ios "$PROJECT_VER"
-            else
-              echo "iOS version ${PROJECT_VER:-unknown} already released; producing rolling build"
-              emit_rolling
-            fi
-
-          # 5. Anything else (manual dispatch with no version) → rolling
-          else
-            emit_rolling
-          fi
-
-      - name: Publish release
+      - name: Update apps.json, tag, and publish release
+        if: steps.check.outputs.already != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          VERSION="${{ steps.ver.outputs.version }}"
           SHORT_SHA="${GITHUB_SHA::7}"
-          TAG_NAME="${{ steps.tag.outputs.tag }}"
-          TITLE="${{ steps.tag.outputs.title }}"
-          KIND="${{ steps.tag.outputs.kind }}"
-          REPO="${{ github.repository }}"
-          BUILD_DATE="$(date -u +'%Y-%m-%d %H:%M UTC')"
-          FOOTER="Built from ${SHORT_SHA} on ${BUILD_DATE}"
+          PUBLISHED_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          IPA_SIZE=$(wc -c < ATSMini.ipa | tr -d ' ')
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/ATSMini.ipa"
 
-          # Compose release notes. Prefer ios/RELEASE_NOTES.md when present so that
-          # a major refresh can ship rich, user-facing notes (also surfaced as
-          # localizedDescription in apps.json by the Feather update workflow).
+          # Build release notes file — avoids multi-line bash strings at col 0 in YAML
           NOTES_FILE="ios/RELEASE_NOTES.md"
-          if [ "$KIND" = "ios" ] && [ -f "$NOTES_FILE" ]; then
-            NOTES="$(cat "$NOTES_FILE")
-
-          ---
-          ${FOOTER}"
-          elif [ "$KIND" = "ios" ]; then
-            NOTES="Unsigned IPA — sideload with AltStore / SideStore / Feather.
-
-          ${FOOTER}"
+          if [ -f "$NOTES_FILE" ]; then
+            cp "$NOTES_FILE" release-notes.md
           else
-            NOTES="${FOOTER}"
+            echo "Unsigned IPA — sideload with AltStore / SideStore / Feather." > release-notes.md
           fi
+          printf '\n\nBuilt from `%s` on %s\n' "${SHORT_SHA}" "$(date -u +'%Y-%m-%d %H:%M UTC')" \
+            >> release-notes.md
 
-          if [ "$KIND" = "rolling" ]; then
-            # Only attach to 'latest' if it already exists (created by firmware workflow)
-            if gh release view latest --repo "$REPO" &>/dev/null; then
-              gh release upload latest ATSMini.ipa --clobber --repo "$REPO"
-            else
-              echo "No 'latest' release found — skipping upload. IPA is available as a build artifact."
-            fi
-          else
-            # Versioned release (iOS or firmware) — create release at current SHA
-            # if it doesn't exist, then upload the IPA. --target ensures the tag
-            # is created from this commit when no tag was pushed (e.g. main-push
-            # auto-release or workflow_dispatch with a version input).
-            gh release create "$TAG_NAME" \
-              --repo "$REPO" \
-              --target "$GITHUB_SHA" \
-              --title "$TITLE" \
-              --notes "$NOTES" || true
-            gh release upload "$TAG_NAME" ATSMini.ipa --clobber --repo "$REPO"
-          fi
-
-      # Patch apps.json (Feather/AltStore manifest) in-band. We can't rely on
-      # the `release: published` event here: releases created by a workflow
-      # using GITHUB_TOKEN do NOT fire downstream workflows (GitHub
-      # suppresses this to prevent infinite loops). Running the manifest
-      # update in the same job that created the release sidesteps that
-      # restriction entirely.
-      - name: Update Feather repo (apps.json)
-        if: steps.tag.outputs.kind == 'ios'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ steps.tag.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          # Operate on a fresh checkout of main — the workflow might be running
-          # on a tagged commit that isn't on main yet, but apps.json always
-          # lives on main.
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B feather-update origin/main
-
-          python3 - << 'PYEOF'
-          import json, os, re, subprocess
-
-          tag  = os.environ['TAG_NAME']
-          repo = os.environ['GITHUB_REPOSITORY']
-          m = re.match(r'^(?:ios-)?v(.+)$', tag)
-          version = m.group(1) if m else tag
-
-          meta = json.loads(subprocess.check_output([
-              'gh', 'release', 'view', tag, '--repo', repo,
-              '--json', 'tagName,publishedAt,body,assets'
-          ]))
-          date = meta['publishedAt']
-          body = meta.get('body', '') or ''
-          ipa = next((a for a in meta.get('assets', []) if a['name'].endswith('.ipa')), None)
-          if not ipa:
-              print(f"No IPA asset on {tag}; skipping apps.json update.")
-              raise SystemExit(0)
-
-          url  = f"https://github.com/{repo}/releases/download/{tag}/{ipa['name']}"
-          size = ipa['size']
+          # Patch apps.json (reads notes from file instead of env var)
+          VERSION="$VERSION" PUBLISHED_DATE="$PUBLISHED_DATE" \
+          DOWNLOAD_URL="$DOWNLOAD_URL" IPA_SIZE="$IPA_SIZE" \
+          python3 - <<'PYEOF'
+          import json, os
+          version = os.environ['VERSION']
+          date    = os.environ['PUBLISHED_DATE']
+          url     = os.environ['DOWNLOAD_URL']
+          size    = int(os.environ['IPA_SIZE'])
+          body    = open('release-notes.md').read()
 
           with open('apps.json') as f:
               data = json.load(f)
-
           app = data['apps'][0]
           app['versions'] = [v for v in app['versions']
                              if v['version'] != version and v['version'] != 'latest']
           app['versions'].insert(0, {
-              "version": version,
-              "buildVersion": version,
-              "date": date,
-              "localizedDescription": body,
-              "downloadURL": url,
-              "size": size,
+              'version': version, 'buildVersion': version,
+              'date': date, 'localizedDescription': body,
+              'downloadURL': url, 'size': size,
           })
-
           with open('apps.json', 'w') as f:
               json.dump(data, f, indent=2)
               f.write('\n')
-
-          print(f"apps.json patched for {version}")
+          print(f'apps.json patched for {version}')
           PYEOF
 
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add apps.json
-          if git diff --cached --quiet; then
-            echo "apps.json already up to date — nothing to commit."
-            exit 0
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Feather repo for ${TAG} [skip ci]"
+            git fetch origin main
+            git rebase origin/main
+            git push origin main
           fi
-          # [skip ci] keeps this commit from re-triggering ios.yml on push.
-          git commit -m "Update Feather repo for ${TAG_NAME} [skip ci]"
-          git push origin HEAD:main
+
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          gh release create "$TAG" \
+            ATSMini.ipa \
+            --title "ATS-Mini Remote ${VERSION}" \
+            --notes-file release-notes.md
