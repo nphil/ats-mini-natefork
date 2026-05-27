@@ -17,6 +17,14 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "3.2.9",
+          "buildVersion": "3.2.9",
+          "date": "2026-05-27T19:48:48Z",
+          "localizedDescription": "## ATS-Mini Remote 3.2 \u2014 Silent auto-reconnect\n\nThe app now remembers the last ATS-Mini you connected to and quietly reconnects whenever it comes back online \u2014 no more manually tapping the Bluetooth pill after the radio sleeps, reboots, or finishes its 5-minute BLE auto-off cycle.\n\n### Auto-reconnect\n- The peripheral UUID of the last connected radio is persisted to UserDefaults\n- On launch (or whenever Bluetooth becomes available), the app does a fast `retrievePeripherals` lookup and connects immediately if the radio is already discoverable\n- If not, it falls into a quiet background scan and connects the moment the radio re-advertises\n- Involuntary disconnects (radio sleeps, out of range, firmware's 5-min BLE auto-off) trigger the same background scan automatically\n- Tapping **Disconnect** explicitly forgets the saved peripheral so the app won't fight you and reconnect\n\n### Paired firmware update (v234)\nBest paired with ATS-Mini firmware **v234** which:\n- Always enables BLE at every boot (5 min, then auto-off at runtime if no client connects)\n- Fixes a crash when the radio enters light sleep with a BLE client still connected\n- Ships 30 new themes matching the iOS app palette (Homebox, Dark, Forest, Ocean, Dracula, Synthwave, Cyberpunk, etc.) so the device and the app look consistent\n\n---\n\nUnsigned IPA \u2014 sideload with AltStore / SideStore / Feather.\n\n\nBuilt from `e4ae5fd` on 2026-05-27 19:48 UTC\n",
+          "downloadURL": "https://github.com/nphil/ats-mini-natefork/releases/download/ios-v3.2.9/ATSMini.ipa",
+          "size": 544795
+        },
+        {
           "version": "3.2.8",
           "buildVersion": "3.2.8",
           "date": "2026-05-27T19:45:54Z",
