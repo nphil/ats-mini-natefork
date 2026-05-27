@@ -292,3 +292,98 @@ jobs:
 
           # Upload new assets (--clobber handles any same-name leftovers)
           gh release upload latest --repo "${REPO}" --clobber ./*.zip ./*-flash.bin
+
+  firmware-auto-release:
+    # Auto-creates a versioned firmware release on main when VER_APP in
+    # Common.h has no matching vX.YY release yet — mirrors how ios.yml
+    # auto-releases ios-vX.Y.Z on a new MARKETING_VERSION.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read firmware version from Common.h
+        id: fw
+        run: |
+          RAW=$(grep -oP '#define VER_APP\s+\K\d+' ats-mini/Common.h)
+          MAJOR="${RAW:0:1}"
+          MINOR="${RAW:1}"
+          VERSION="${MAJOR}.${MINOR}"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "Firmware version: ${VERSION} (tag: ${TAG})"
+
+      - name: Check whether release already exists
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.fw.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} already released — nothing to do."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "No release for ${TAG} yet — will create one."
+          fi
+
+      - name: Download build artifacts
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'ats-mini-*'
+          merge-multiple: true
+          path: artifact
+
+      - name: Package artifacts with clean version names
+        if: steps.check.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.fw.outputs.tag }}
+        run: |
+          mkdir -p release
+          # Zip each variant dir, renaming to ats-mini-vX.YY-<variant>.zip
+          for dir in artifact/*/; do
+            dir="${dir%/}"
+            VARIANT=$(basename "$dir" | rev | cut -d'-' -f1 | rev)   # ospi or qspi
+            zip -r "release/ats-mini-${TAG}-${VARIANT}.zip" "$dir"
+          done
+          # Rename and copy flash binaries
+          find artifact -name '*-flash.bin' | while read -r f; do
+            VARIANT=$(basename "$f" | rev | cut -d'-' -f1,2 | rev)   # ospi-flash.bin / qspi-flash.bin
+            cp "$f" "release/ats-mini-${TAG}-${VARIANT}"
+          done
+
+      - name: Extract changelog section
+        if: steps.check.outputs.skip == 'false'
+        id: notes
+        env:
+          VERSION: ${{ steps.fw.outputs.version }}
+        run: |
+          NOTES=$(python3 - << 'PYEOF'
+          import os, re
+          ver = os.environ['VERSION'].replace('.', r'\.')
+          t = open('CHANGELOG.md').read()
+          m = re.search(r'(^## ' + ver + r' .*?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
+          print(m.group(0).strip() if m else 'Firmware release.')
+          PYEOF
+          )
+          # Write to file to avoid quoting issues
+          echo "$NOTES" > fw-release-notes.md
+
+      - name: Create versioned firmware release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.fw.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "${TAG}" \
+            --notes-file fw-release-notes.md \
+            release/*.zip release/*-flash.bin
