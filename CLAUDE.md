@@ -47,12 +47,32 @@ Project guidelines for Claude when working on this repo.
 ## Versioning
 
 - `MARKETING_VERSION` in `ios/project.yml` is the source of truth for the
-  iOS app version. Bump it (and `CURRENT_PROJECT_VERSION`) in the same
-  commit as the user-facing change.
-- Update `ios/RELEASE_NOTES.md` alongside any version bump — its contents
-  become the GitHub Release body and Feather `localizedDescription`.
-- Semver: major for redesigns / breaking nav changes, minor for new
-  features, patch for fixes.
+  iOS app version. **Bump it automatically** alongside any user-facing
+  change — never ask the user what version to use.
+- Always increment `CURRENT_PROJECT_VERSION` (build number) by 1 on every
+  release.
+- Rewrite `ios/RELEASE_NOTES.md` for the new version on the same commit —
+  it becomes the GitHub Release body and the Feather
+  `localizedDescription`. Notes should describe the delta over the
+  previously-shipped version, not cumulative history.
+
+### Auto-bump rule (assess the change scope and decide)
+
+Classify the change yourself, then bump accordingly:
+
+- **Major (X.0.0)** — a redesign, a navigation overhaul, removing /
+  renaming a tab, a breaking visual or behavioral change. The user said
+  "redesign / overhaul / major refresh / rebuild".
+- **Minor (x.Y.0)** — net-new feature, new screen / section, new theming
+  system, new control type, significant UX improvement that doesn't break
+  existing flows. The user said "add / introduce / build out".
+- **Patch (x.y.Z)** — bug fix, polish, icon swap, copy tweak, small layout
+  correction, dependency bump. The user said "fix / tweak / adjust /
+  clean up".
+
+When in doubt, bump the lower tier (prefer minor over major, patch over
+minor). Don't bump twice in the same conversation — if you've already
+released a version this turn, ship subsequent fixes as the next patch.
 
 ## Branches
 
