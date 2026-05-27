@@ -58,6 +58,11 @@ final class RadioState: ObservableObject {
     // Seek
     @Published var isSeeking = false
 
+    // WiFi / OTA
+    @Published var wifiIP = ""        // device IP for HTTP OTA (STA or AP)
+    @Published var wifiIsAP = false   // true when device is in AP mode
+    @Published var firmwareVersion: Int = 0  // e.g. 235 for v2.35
+
     // RDS PS stability filter
     private var psStableValue = ""
     private var psPendingValue = ""
@@ -157,6 +162,11 @@ final class RadioState: ObservableObject {
                 self.rdsPTY = ""
                 self.rdsTime = ""
             }
+
+            // WiFi / OTA info
+            if let wip = msg["wip"] as? String { self.wifiIP = wip }
+            if let wm  = msg["wm"]  as? Int    { self.wifiIsAP = (wm == 1) }
+            if let fw  = msg["fw"]  as? Int    { self.firmwareVersion = fw }
 
             // Clear seek on new freq
             if self.isSeeking { self.isSeeking = false }

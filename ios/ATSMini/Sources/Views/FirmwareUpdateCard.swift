@@ -136,27 +136,40 @@ private extension String {
     var utf8Data: Data { Data(utf8) }
 }
 
-// MARK: - Settings View (Theme + Firmware + About)
+// MARK: - Settings View
 
 struct SettingsView: View {
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var radio: RadioState
     @StateObject private var ota = OTAManager()
 
-    enum Source: String, CaseIterable, Identifiable {
+    // Releases
+    @State private var releases: [FirmwareRelease] = []
+    @State private var releasesLoading = false
+    @State private var releasesError: String? = nil
+
+    // Manual / advanced
+    @State private var showAdvanced = false
+    @State private var manualHost = "atsmini.local"
+    @State private var manualSource: ManualSource = .file
+    @State private var firmwareURL = ""
+    @State private var showFilePicker = false
+    @State private var showThemePicker = false
+
+    enum ManualSource: String, CaseIterable, Identifiable {
         case file = "Local File"
         case url  = "Web URL"
         var id: String { rawValue }
     }
 
-    @State private var source: Source = .file
-    @State private var host = "atsmini.local"
-    @State private var firmwareURL = ""
-    @State private var showFilePicker = false
-    @State private var showThemePicker = false
+    // Best host: prefer auto-detected IP from device status
+    private var effectiveHost: String {
+        radio.wifiIP.isEmpty ? manualHost : radio.wifiIP
+    }
 
     var body: some View {
         Form {
-            // MARK: Theme
+            // MARK: Appearance
             Section {
                 Button {
                     showThemePicker = true
@@ -184,68 +197,38 @@ struct SettingsView: View {
                 Text("30 color themes ported from Homebox / HomeBoy.")
             }
 
-            // MARK: Firmware connection
+            // MARK: Firmware Update
             Section {
-                LabeledContent("Device") {
-                    TextField("atsmini.local or IP", text: $host)
-                        .multilineTextAlignment(.trailing)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
+                deviceConnectionRow
+                releasesContent
             } header: {
-                Text("Firmware — Connection")
+                HStack {
+                    Text("Firmware Update")
+                    Spacer()
+                    if releasesLoading {
+                        ProgressView().scaleEffect(0.7)
+                    } else {
+                        Button {
+                            Task { await loadReleases() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
             } footer: {
-                Text("Phone must be on the same Wi-Fi network as the device (or connected to the device's AP).")
-            }
-
-            Section("Firmware — Source") {
-                Picker("Update from", selection: $source) {
-                    ForEach(Source.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .disabled(ota.phase.isActive)
-
-                if source == .url {
-                    LabeledContent("URL") {
-                        TextField("https://…/firmware.bin", text: $firmwareURL)
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                    }
-                }
-            }
-
-            Section {
-                if source == .file {
-                    Button {
-                        showFilePicker = true
-                    } label: {
-                        Label("Choose .bin file…", systemImage: "folder")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(theme.current.accentColor)
-                    .disabled(ota.phase.isActive)
+                if radio.wifiIP.isEmpty {
+                    Text("Enable Wi-Fi on the radio (or use AP mode) so the app can reach its update endpoint.")
+                } else if radio.wifiIsAP {
+                    Text("Device is in AP mode. Connect your phone to its Wi-Fi network, then flash.")
                 } else {
-                    Button {
-                        ota.flashFromURL(firmwareURL, host: host, ble: BLEManager.shared)
-                    } label: {
-                        Label("Flash from URL", systemImage: "arrow.down.circle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(theme.current.accentColor)
-                    .disabled(ota.phase.isActive || firmwareURL.isEmpty)
-                }
-
-                if ota.phase != .idle {
-                    Button("Reset", role: .cancel) { ota.reset() }
-                        .frame(maxWidth: .infinity)
-                        .disabled(ota.phase.isActive)
+                    Text("Connected via the same Wi-Fi network.")
                 }
             }
 
+            // MARK: OTA Progress (shown while/after flash)
             if ota.phase != .idle {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
@@ -267,15 +250,89 @@ struct SettingsView: View {
                             .animation(.smooth(duration: 0.25), value: ota.progress)
                     }
                     .padding(.vertical, 4)
+
+                    if !ota.phase.isActive {
+                        Button("Dismiss", role: .cancel) { ota.reset() }
+                            .frame(maxWidth: .infinity)
+                    }
                 } header: {
                     Text("Progress")
                 }
             }
 
+            // MARK: Advanced (manual flash)
+            Section {
+                Button {
+                    withAnimation { showAdvanced.toggle() }
+                } label: {
+                    HStack {
+                        Text("Manual Flash")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: showAdvanced ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if showAdvanced {
+                    LabeledContent("Device host") {
+                        TextField("atsmini.local or IP", text: $manualHost)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+
+                    Picker("Source", selection: $manualSource) {
+                        ForEach(ManualSource.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(ota.phase.isActive)
+
+                    if manualSource == .url {
+                        LabeledContent("URL") {
+                            TextField("https://…/firmware.bin", text: $firmwareURL)
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.URL)
+                        }
+                    }
+
+                    if manualSource == .file {
+                        Button {
+                            showFilePicker = true
+                        } label: {
+                            Label("Choose .bin file…", systemImage: "folder")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(theme.current.accentColor)
+                        .disabled(ota.phase.isActive)
+                    } else {
+                        Button {
+                            ota.flashFromURL(firmwareURL, host: manualHost, ble: BLEManager.shared)
+                        } label: {
+                            Label("Flash from URL", systemImage: "arrow.down.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(theme.current.accentColor)
+                        .disabled(ota.phase.isActive || firmwareURL.isEmpty)
+                    }
+                }
+            } header: {
+                Text("Advanced")
+            }
+
             // MARK: About
             Section("About") {
-                LabeledContent("Version", value: appVersion)
+                LabeledContent("App version", value: appVersion)
                 LabeledContent("Build", value: appBuild)
+                if radio.firmwareVersion > 0 {
+                    LabeledContent("Radio firmware", value: formattedFirmwareVersion(radio.firmwareVersion))
+                }
                 Link(destination: URL(string: "https://github.com/nphil/ats-mini-natefork")!) {
                     Label("GitHub", systemImage: "link")
                 }
@@ -288,13 +345,146 @@ struct SettingsView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                ota.flashFromFile(url, host: host, ble: BLEManager.shared)
+                ota.flashFromFile(url, host: manualHost, ble: BLEManager.shared)
             }
         }
         .sheet(isPresented: $showThemePicker) {
             ThemePickerSheet(isPresented: $showThemePicker)
         }
+        .task { await loadReleases() }
     }
+
+    // MARK: - Device connection row
+
+    @ViewBuilder
+    private var deviceConnectionRow: some View {
+        if !radio.wifiIP.isEmpty {
+            HStack {
+                Image(systemName: radio.wifiIsAP ? "wifi.router" : "wifi")
+                    .foregroundStyle(theme.current.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(radio.wifiIsAP ? "AP mode" : "Same network")
+                        .font(.callout)
+                    Text(radio.wifiIP)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            .padding(.vertical, 2)
+        } else {
+            HStack {
+                Image(systemName: "wifi.slash")
+                    .foregroundStyle(.secondary)
+                Text("Radio not on Wi-Fi")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Releases content
+
+    @ViewBuilder
+    private var releasesContent: some View {
+        if let error = releasesError {
+            HStack {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Retry") { Task { await loadReleases() } }
+                    .font(.callout)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.current.accentColor)
+            }
+        } else if releases.isEmpty && !releasesLoading {
+            Text("No firmware releases found.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(Array(releases.enumerated()), id: \.element.id) { idx, release in
+                releaseRow(release, isLatest: idx == 0)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func releaseRow(_ release: FirmwareRelease, isLatest: Bool) -> some View {
+        let isCurrent = radio.firmwareVersion > 0 && release.versionInt == radio.firmwareVersion
+        let canFlash = !radio.wifiIP.isEmpty && !ota.phase.isActive
+
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("v\(release.version)")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(isCurrent ? theme.current.accentColor : .primary)
+                    if isLatest {
+                        Text("LATEST")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(theme.current.accentColor.opacity(0.15))
+                            .foregroundStyle(theme.current.accentColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    if isCurrent {
+                        Text("INSTALLED")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15))
+                            .foregroundStyle(.green)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+                Text("\(release.formattedDate) · \(release.formattedSize)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                ota.flashFromURL(release.downloadURL, host: effectiveHost, ble: BLEManager.shared)
+            } label: {
+                Text(isCurrent ? "Re-flash" : "Flash")
+                    .font(.callout.weight(.medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.glass)
+            .tint(theme.current.accentColor)
+            .disabled(!canFlash)
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - Load releases
+
+    private func loadReleases() async {
+        releasesLoading = true
+        releasesError = nil
+        do {
+            let fetched = try await GitHubReleasesService.shared.fetchFirmwareReleases()
+            await MainActor.run {
+                releases = fetched
+                releasesLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                releasesError = "Could not load releases."
+                releasesLoading = false
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -302,6 +492,10 @@ struct SettingsView: View {
 
     private var appBuild: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
+    private func formattedFirmwareVersion(_ v: Int) -> String {
+        "v\(v / 100).\(String(format: "%02d", v % 100))"
     }
 
     // MARK: - Status helpers
@@ -416,7 +610,6 @@ struct ThemeSwatch: View {
 
     var body: some View {
         ZStack {
-            // Background
             Circle()
                 .fill(theme.backgroundColor)
                 .frame(width: size, height: size)
@@ -424,19 +617,16 @@ struct ThemeSwatch: View {
                     Circle().stroke(.secondary.opacity(0.25), lineWidth: 1)
                 }
 
-            // Primary accent dot (top-left)
             Circle()
                 .fill(theme.primaryColor)
                 .frame(width: size * 0.46, height: size * 0.46)
                 .offset(x: -size * 0.13, y: -size * 0.04)
 
-            // Accent dot (bottom-right)
             Circle()
                 .fill(theme.accentColor)
                 .frame(width: size * 0.29, height: size * 0.29)
                 .offset(x: size * 0.19, y: size * 0.13)
 
-            // Selection ring
             if isSelected {
                 Circle()
                     .stroke(theme.accentColor, lineWidth: 3)

@@ -107,6 +107,20 @@ char *getWiFiIPAddress()
   return strcpy(ip, WiFi.status()==WL_CONNECTED ? WiFi.localIP().toString().c_str() : "");
 }
 
+// Returns the best IP for HTTP OTA: STA IP when connected to a router,
+// AP IP when the device is acting as an access point.
+char *getOTAIPAddress()
+{
+  static char ip[16];
+  wifi_mode_t mode = WiFi.getMode();
+  if ((mode == WIFI_STA || mode == WIFI_AP_STA) && WiFi.status() == WL_CONNECTED)
+    return strcpy(ip, WiFi.localIP().toString().c_str());
+  if (mode == WIFI_AP || mode == WIFI_AP_STA)
+    return strcpy(ip, WiFi.softAPIP().toString().c_str());
+  ip[0] = '\0';
+  return ip;
+}
+
 //
 // Stop WiFi hardware
 //
