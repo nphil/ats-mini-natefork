@@ -12,29 +12,24 @@ set them up proactively before shipping.
 
 ## Workflow preferences
 
-- **Never create pull requests as a discussion artifact.** When a task is
-  ready to ship, push to the designated dev branch, then immediately
-  merge to `main` via the GitHub MCP (`create_pull_request` →
-  `merge_pull_request`, no review wait). Do not ask the user how to land
-  a change.
-- **Releases are fully automatic** and self-contained in a single
-  workflow run. Once a `main`-bound merge lands:
-  1. `.github/workflows/ios.yml` reads `MARKETING_VERSION` from
-     `ios/project.yml`. If there's no matching `ios-v<version>` release
-     yet, it auto-creates the tag at the current SHA, builds the
-     unsigned IPA, and publishes the release with the contents of
-     `ios/RELEASE_NOTES.md` as the body.
-  2. The **same job** then patches `apps.json` (the Feather / AltStore
-     manifest) with the new version + IPA URL and commits to `main`
-     with `[skip ci]`.
-- **Do not use a separate `release: published` workflow** for the
-  manifest update. Releases created by a workflow using `GITHUB_TOKEN`
-  do not fire downstream workflows (GitHub suppresses these events to
-  prevent infinite loops). The in-band step in `ios.yml` is the
-  durable fix — keep it; do not reintroduce `update-repo.yml`.
-- Push to the designated dev branch only (system-enforced by the remote
-  proxy), then use MCP for the merge to `main` — never bypass with a
-  direct push to `main`.
+- **Always push to BOTH branches** so changes land on `main` immediately
+  without a manual PR merge:
+  ```
+  git push origin HEAD:main && git push origin claude/<slug>-<id>
+  ```
+  CI conflict recovery (CI auto-bumps version after every push):
+  ```
+  git fetch origin main && git rebase origin/main \
+    && git push origin HEAD:main \
+    && git push origin claude/<slug>-<id> --force-with-lease
+  ```
+- **Releases are fully automatic.** Every push to `main` triggers
+  `ios.yml`, which auto-increments the patch version in `ios/project.yml`,
+  builds the unsigned IPA, patches `apps.json`, commits the bump with
+  `[skip ci]`, creates the `ios-vX.Y.Z` tag, and publishes the release.
+- **Do not use a separate `release: published` workflow** for the manifest
+  update — it won't fire when the release is created by `GITHUB_TOKEN`.
+  The in-band step in `ios.yml` is the durable fix.
 - Don't push tags by hand. The pipeline creates them.
 
 ## Design preferences (iOS app)
@@ -59,36 +54,28 @@ set them up proactively before shipping.
 
 ## Versioning
 
-- `MARKETING_VERSION` in `ios/project.yml` is the source of truth for the
-  iOS app version. **Bump it automatically** alongside any user-facing
-  change — never ask the user what version to use.
-- Always increment `CURRENT_PROJECT_VERSION` (build number) by 1 on every
-  release.
-- Rewrite `ios/RELEASE_NOTES.md` for the new version on the same commit —
-  it becomes the GitHub Release body and the Feather
-  `localizedDescription`. Notes should describe the delta over the
-  previously-shipped version, not cumulative history.
+- **Patch bumps are handled by CI automatically** — `ios.yml` increments
+  `x.y.Z` and `CURRENT_PROJECT_VERSION` on every main push. Do not bump
+  the patch version manually.
+- For **minor or major bumps** (new feature, redesign), set
+  `MARKETING_VERSION` in `ios/project.yml` to the desired `x.Y.0` or
+  `X.0.0` before pushing. CI will then patch-increment from there on the
+  next release.
+- Update `ios/RELEASE_NOTES.md` alongside significant changes — it becomes
+  the GitHub Release body and Feather `localizedDescription`. For routine
+  patch releases it is optional (CI uses it if present).
+- For **firmware**, bump `VER_APP` in `ats-mini/Common.h` and update
+  `CHANGELOG.md` when making firmware changes. The `firmware-auto-release`
+  job in `build.yml` detects the new version and publishes a `vX.YY`
+  release automatically.
 
-### Auto-bump rule (assess the change scope and decide)
+### Version classification
 
-Classify the change yourself, then bump accordingly:
-
-- **Major (X.0.0)** — a redesign, a navigation overhaul, removing /
-  renaming a tab, a breaking visual or behavioral change. The user said
-  "redesign / overhaul / major refresh / rebuild".
-- **Minor (x.Y.0)** — net-new feature, new screen / section, new theming
-  system, new control type, significant UX improvement that doesn't break
-  existing flows. The user said "add / introduce / build out".
-- **Patch (x.y.Z)** — bug fix, polish, icon swap, copy tweak, small layout
-  correction, dependency bump. The user said "fix / tweak / adjust /
-  clean up".
-
-When in doubt, bump the lower tier (prefer minor over major, patch over
-minor). Don't bump twice in the same conversation — if you've already
-released a version this turn, ship subsequent fixes as the next patch.
+- **Major (X.0.0)** — redesign, navigation overhaul, breaking change.
+- **Minor (x.Y.0)** — net-new feature, new screen, new theming system.
+- **Patch (x.y.Z)** — CI handles this automatically; no manual bump needed.
 
 ## Branches
 
-- Develop on the per-task branch the system specifies
-  (`claude/<slug>-<id>`). Never push to a different branch directly.
-- Land work on `main` via MCP merge_pull_request as described above.
+- Develop on the per-task branch the system specifies (`claude/<slug>-<id>`).
+- Push to **both** `main` and the dev branch on every commit (see above).
