@@ -4,6 +4,20 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.34 (2026-05-27)
+
+
+### Added
+
+- BLE now comes up automatically at every boot regardless of the last saved state. After 5 minutes with no client connection it switches off to save power, but the OFF state is never persisted — the next power-up always brings BLE back up.
+- Ship 30 new themes derived from the iOS app's HSL palette (Homebox, Light, Dark, Forest, Garden, Emerald, Aqua, Ocean, Night, Dracula, Synthwave, Halloween, Coffee, Business, Luxury, Black, Cupcake, Valentine, Pastel, Fantasy, Retro, Bumblebee, Lemonade, Corporate, CMYK, Autumn, Winter, Acid, Cyberpunk, Wireframe, Lofi) so the device and the iOS app look visually consistent.
+
+
+### Fixed
+
+- Fix crash when the device enters light sleep while a BLE client is connected. The teardown sequence now sets `started = false` before tearing down GATT state, gracefully disconnects active clients with a short propagation delay, and guards `onDisconnect` against post-stop invocation.
+
+
 ## 2.33 (2025-09-22)
 
 
