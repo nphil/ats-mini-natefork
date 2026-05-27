@@ -11,6 +11,5 @@ profiles:
       - Async TCP (3.4.7)
       - ESP Async WebServer (3.7.10)
       - NTPClient (3.2.1)
-      - NimBLE-Arduino (2.3.7)
 
 default_profile: esp32s3-ospi
