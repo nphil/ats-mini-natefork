@@ -4,6 +4,25 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.43 (2026-05-27)
+
+### Fixed
+
+- **Firmware version now shown immediately at boot.** The display and backlight come on in the first 100 ms of startup — before any WiFi, BLE, or SI4732 initialisation. This makes it easy to confirm which firmware is running, and means the screen is lit even if a later init step fails. Previously the backlight stayed dark until well into setup(), making any crash before that point look identical to a blank power-on.
+- **Recovery mode now works without display re-init.** `checkRecoveryBoot()` is called after the display is already up, so the recovery screen appears immediately when the encoder button is held at power-on.
+
+## 2.42 (2026-05-27)
+
+### Fixed
+
+- **Reverted BLE stack from NimBLE-Arduino back to Bluedroid.** NimBLE-Arduino performs global-level C++ constructor initialisation before `setup()` runs. On this hardware that crashes the device before any app code executes, producing a persistent bootloop where the display never comes on and USB keeps reconnecting. Restoring the original Bluedroid stack (used through v2.36) eliminates the crash. The Nordic UART service UUIDs and iOS app behaviour are unchanged.
+
+  **If your device is stuck bootlooping:** download `ats-mini-v2.43-ospi-flash.bin` (or newer) from the Releases page and flash it with esptool at address `0x0`:
+  ```
+  esptool.py --chip esp32s3 write_flash 0x0 ats-mini-v2.43-ospi-flash.bin
+  ```
+  Use the `*-ospi-flash.bin` file (the merged binary), not the `*-ospi-ota.bin` file (which is only for web OTA uploads).
+
 ## 2.40 (2026-05-27)
 
 ### Added

@@ -70,17 +70,9 @@ static const char PAGE_MAIN[] PROGMEM = R"html(
 
 static void recoveryDisplayInit()
 {
-  // Enable external LDO (powers the display rail)
-  pinMode(PIN_POWER_ON, OUTPUT);
-  digitalWrite(PIN_POWER_ON, HIGH);
-  delay(50);
-
-  // Backlight PWM — start dark, brighten after init
-  ledcAttach(PIN_LCD_BL, 16000, 8);
-  ledcWrite(PIN_LCD_BL, 0);
-
-  tft.begin();
-  tft.setRotation(3);
+  // LDO, backlight PWM, and TFT are already initialised in setup() before
+  // checkRecoveryBoot() is called — just ramp brightness and clear.
+  ledcWrite(PIN_LCD_BL, 255);
   tft.fillScreen(TFT_BLACK);
 }
 

@@ -117,6 +117,47 @@ NordicUART BLESerial = NordicUART(RECEIVER_NAME);
 //
 void setup()
 {
+  // ── Bring the display up immediately ───────────────────────────────────────
+  // Doing this before anything else means the user can see the firmware is
+  // running, the version number is visible, and recovery mode can show its UI
+  // without needing to re-initialise the hardware.
+  pinMode(PIN_POWER_ON, OUTPUT);
+  digitalWrite(PIN_POWER_ON, HIGH);
+  delay(100);  // LDO settle — also covers the SI4732 power-on requirement
+
+  ledcAttach(PIN_LCD_BL, 16000, 8);
+  ledcWrite(PIN_LCD_BL, 0);
+
+  tft.begin();
+  tft.setRotation(3);
+
+  // Detect and fix mirrored / inverted display variants
+  // https://github.com/esp32-si4732/ats-mini/issues/41
+  uint8_t did3 = tft.readcommand8(ST7789_RDDID, 3);
+  if(did3 == 0x93)
+  {
+    tft.invertDisplay(0);
+    tft.writecommand(TFT_MADCTL);
+    tft.writedata(TFT_MAD_MV | TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_BGR);
+  }
+  else if(did3 == 0x85)
+  {
+    tft.writecommand(0x26); // GAMSET
+    tft.writedata(8);
+    tft.writecommand(0x55); // WRCACE
+    tft.writedata(0xB1);
+  }
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(6, 6);
+  tft.print("ATS-Mini");
+  tft.setTextSize(1);
+  tft.setCursor(6, 32);
+  tft.print(getVersion(true));
+  ledcWrite(PIN_LCD_BL, 200);  // turn backlight on — firmware version visible
+
   // Recovery mode: if encoder is held at power-on for >1 s, enter the
   // WiFi-OTA recovery UI and never return to normal boot.
   checkRecoveryBoot();
@@ -129,48 +170,12 @@ void setup()
   pinMode(ENCODER_PIN_A, INPUT_PULLUP);
   pinMode(ENCODER_PIN_B, INPUT_PULLUP);
 
-  // Enable audio amplifier
-  // Initally disable the audio amplifier until the SI4732 has been setup
+  // Enable audio amplifier — disabled until SI4732 is ready
   pinMode(PIN_AMP_EN, OUTPUT);
   digitalWrite(PIN_AMP_EN, LOW);
 
-  // Enable SI4732 VDD
-  pinMode(PIN_POWER_ON, OUTPUT);
-  digitalWrite(PIN_POWER_ON, HIGH);
-  delay(100);
-
-  // The line below may be necessary to setup I2C pins on ESP32
+  // I2C bus for SI4732 (LDO already settled above)
   Wire.begin(ESP32_I2C_SDA, ESP32_I2C_SCL);
-
-  // TFT display brightness control (PWM)
-  // Note: At brightness levels below 100%, switching from the PWM may cause power spikes and/or RFI
-  ledcAttach(PIN_LCD_BL, 16000, 8);  // Pin assignment, 16kHz, 8-bit
-  ledcWrite(PIN_LCD_BL, 0);          // Default value 0%
-
-  // TFT display setup
-  tft.begin();
-  tft.setRotation(3);
-
-  // Detect and fix the mirrored & inverted display
-  // https://github.com/esp32-si4732/ats-mini/issues/41
-  uint8_t did3 = tft.readcommand8(ST7789_RDDID, 3);
-  // 0x048181B3 - the original display
-  // 0x04858552 - high gamma display
-  // 0x00009307 - inverted & mirrored display
-  if(did3 == 0x93)
-  {
-    tft.invertDisplay(0);
-    tft.writecommand(TFT_MADCTL);
-    tft.writedata(TFT_MAD_MV | TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_BGR);
-  }
-  else if(did3 == 0x85)
-  {
-    tft.writecommand(0x26); // GAMSET
-    tft.writedata(8);       // Gamma Curve 3
-
-    tft.writecommand(0x55); // WRCACE (content adaptive brightness and color)
-    tft.writedata(0xB1);    // High enhancement, UI mode
-  }
 
   tft.fillScreen(TH.bg);
   spr.createSprite(320, 170);
