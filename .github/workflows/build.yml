@@ -83,20 +83,30 @@ jobs:
       - name: Setup arduino-cli
         uses: arduino/setup-arduino-cli@v2
 
+      - name: Cache Arduino core and libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino-esp32-3.3.7-${{ hashFiles('ats-mini/sketch.yaml') }}
+          restore-keys: |
+            arduino-esp32-3.3.7-
+
       - name: Install ESP32 core with retries
         run: |
-          # Pre-fetch the ESP32 core before compile-sketches runs.
-          # Espressif's CDN returns intermittent 502s on some chip-variant
-          # lib packages (esp32p4, esp32h2, etc.); retrying fixes it.
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls \
             https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          for attempt in 1 2 3; do
-            arduino-cli core install esp32:esp32@3.3.7 && break
-            echo "Attempt $attempt failed – waiting 30s before retry..."
-            sleep 30
-          done
+          # Skip install if already cached
+          if ! arduino-cli core list | grep -q 'esp32:esp32.*3.3.7'; then
+            for attempt in 1 2 3; do
+              arduino-cli core install esp32:esp32@3.3.7 && break
+              echo "Attempt $attempt failed – waiting 30s before retry..."
+              sleep 30
+            done
+          fi
 
       - name: Compile firmware
         uses: arduino/compile-sketches@v1
