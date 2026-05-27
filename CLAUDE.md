@@ -64,10 +64,18 @@ set them up proactively before shipping.
 - Update `ios/RELEASE_NOTES.md` alongside significant changes — it becomes
   the GitHub Release body and Feather `localizedDescription`. For routine
   patch releases it is optional (CI uses it if present).
-- For **firmware**, bump `VER_APP` in `ats-mini/Common.h` and update
-  `CHANGELOG.md` when making firmware changes. The `firmware-auto-release`
-  job in `build.yml` detects the new version and publishes a `vX.YY`
-  release automatically.
+- For **firmware**, patch bumps are handled by CI automatically —
+  `build.yml` increments `VER_APP` in `ats-mini/Common.h` on every push
+  to `main` and publishes a `vX.YY` release with the OSPI flash binary
+  attached. Do not bump `VER_APP` manually for routine changes.
+- Update `CHANGELOG.md` with a `## X.YY (YYYY-MM-DD)` section *matching
+  the next auto-bumped version* (current on-disk `VER_APP` + 1) — the
+  auto-release uses that section as the release body. If no section
+  exists, a generic note is published.
+- For **minor or major firmware bumps**, set `VER_APP` directly in
+  `Common.h` to one less than the desired version (e.g. set to `299`
+  if you want the next release to be `v3.00`); CI auto-bumps on the
+  next push.
 
 ### Version classification
 

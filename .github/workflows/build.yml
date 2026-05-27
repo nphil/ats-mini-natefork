@@ -43,6 +43,9 @@ jobs:
 
     outputs:
       slug: ${{ steps.slug.outputs.slug }}
+      fw_version: ${{ steps.bump.outputs.version }}
+      fw_tag: ${{ steps.bump.outputs.tag }}
+      fw_raw: ${{ steps.bump.outputs.new_raw }}
 
     steps:
       - name: Checkout repository
@@ -51,6 +54,26 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           ref: "${{ github.event.inputs.revision || github.ref }}"
+
+      - name: Auto-bump VER_APP (push to main only)
+        id: bump
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          RAW=$(grep -oP '#define VER_APP\s+\K\d+' ats-mini/Common.h)
+          NEW=$((RAW + 1))
+          MAJOR="${NEW:0:1}"
+          MINOR="${NEW:1}"
+          VERSION="${MAJOR}.${MINOR}"
+          TAG="v${VERSION}"
+          # Update Common.h in-place (committed later by firmware-auto-release)
+          sed -i "s/#define VER_APP        ${RAW}/#define VER_APP        ${NEW}/" ats-mini/Common.h
+          {
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+            echo "new_raw=${NEW}"
+            echo "old_raw=${RAW}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Auto-bumped VER_APP: ${RAW} -> ${NEW} (tag ${TAG})"
 
       - name: Get version slug
         id: slug
@@ -301,46 +324,40 @@ jobs:
           gh release upload latest --repo "${REPO}" --clobber ./*.zip ./*-flash.bin
 
   firmware-auto-release:
-    # Auto-creates a versioned firmware release on main when VER_APP in
-    # Common.h has no matching vX.YY release yet — mirrors how ios.yml
-    # auto-releases ios-vX.Y.Z on a new MARKETING_VERSION.
+    # Auto-bumps VER_APP and publishes a versioned firmware release on every
+    # push to main. Mirrors how ios.yml auto-releases ios-vX.Y.Z on each push.
+    # Serialized so back-to-back pushes don't race on tag creation.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: firmware-release
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.build.outputs.fw_version }}
+      TAG: ${{ needs.build.outputs.fw_tag }}
+      NEW_RAW: ${{ needs.build.outputs.fw_raw }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read firmware version from Common.h
-        id: fw
+      - name: Apply VER_APP bump
         run: |
+          # Re-apply the same bump the build job did (idempotent: same formula)
           RAW=$(grep -oP '#define VER_APP\s+\K\d+' ats-mini/Common.h)
-          MAJOR="${RAW:0:1}"
-          MINOR="${RAW:1}"
-          VERSION="${MAJOR}.${MINOR}"
-          TAG="v${VERSION}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
-          echo "Firmware version: ${VERSION} (tag: ${TAG})"
-
-      - name: Check whether release already exists
-        id: check
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.fw.outputs.tag }}
-        run: |
-          if gh release view "${TAG}" --repo "${{ github.repository }}" &>/dev/null; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "${TAG} already released — nothing to do."
+          if [ "$RAW" = "$NEW_RAW" ]; then
+            echo "VER_APP already at ${NEW_RAW} on disk — nothing to write."
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "No release for ${TAG} yet — will create one."
+            sed -i "s/#define VER_APP        ${RAW}/#define VER_APP        ${NEW_RAW}/" ats-mini/Common.h
+            echo "Wrote VER_APP=${NEW_RAW} to Common.h"
           fi
 
       - name: Download build artifacts
-        if: steps.check.outputs.skip == 'false'
         uses: actions/download-artifact@v4
         with:
           pattern: 'ats-mini-*'
@@ -348,49 +365,62 @@ jobs:
           path: artifact
 
       - name: Package artifacts with clean version names
-        if: steps.check.outputs.skip == 'false'
-        env:
-          TAG: ${{ steps.fw.outputs.tag }}
         run: |
           mkdir -p release
-          # Zip each variant dir, renaming to ats-mini-vX.YY-<variant>.zip
           for dir in artifact/*/; do
             dir="${dir%/}"
-            VARIANT=$(basename "$dir" | rev | cut -d'-' -f1 | rev)   # ospi or qspi
+            VARIANT=$(basename "$dir" | rev | cut -d'-' -f1 | rev)   # ospi (or qspi)
             zip -r "release/ats-mini-${TAG}-${VARIANT}.zip" "$dir"
           done
-          # Rename and copy flash binaries
           find artifact -name '*-flash.bin' | while read -r f; do
-            VARIANT=$(basename "$f" | rev | cut -d'-' -f1,2 | rev)   # ospi-flash.bin / qspi-flash.bin
+            VARIANT=$(basename "$f" | rev | cut -d'-' -f1,2 | rev)   # ospi-flash.bin
             cp "$f" "release/ats-mini-${TAG}-${VARIANT}"
           done
 
       - name: Extract changelog section
-        if: steps.check.outputs.skip == 'false'
-        id: notes
-        env:
-          VERSION: ${{ steps.fw.outputs.version }}
         run: |
-          NOTES=$(python3 - << 'PYEOF'
+          python3 - << 'PYEOF' > fw-release-notes.md
           import os, re
           ver = os.environ['VERSION'].replace('.', r'\.')
-          t = open('CHANGELOG.md').read()
-          m = re.search(r'(^## ' + ver + r' .*?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
-          print(m.group(0).strip() if m else 'Firmware release.')
+          try:
+              t = open('CHANGELOG.md').read()
+              m = re.search(r'(^## ' + ver + r' .*?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
+              if m:
+                  print(m.group(0).strip())
+              else:
+                  print(f"Firmware release {os.environ['TAG']}.\n\n"
+                        f"_Auto-built from commit_ `{os.environ.get('GITHUB_SHA', '')[:7]}`")
+          except Exception as e:
+              print(f"Firmware release {os.environ['TAG']}.")
           PYEOF
-          )
-          # Write to file to avoid quoting issues
-          echo "$NOTES" > fw-release-notes.md
 
-      - name: Create versioned firmware release
-        if: steps.check.outputs.skip == 'false'
+      - name: Commit version bump, tag, and publish release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.fw.outputs.tag }}
         run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add ats-mini/Common.h
+          if git diff --cached --quiet; then
+            echo "No Common.h change to commit (already on ${NEW_RAW})"
+          else
+            git commit -m "chore: bump firmware to ${TAG} [skip ci]"
+            git fetch origin main
+            git rebase --autostash origin/main
+            git push origin main
+          fi
+
+          # Tag from whatever HEAD looks like now (which has the bumped Common.h)
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists locally — skipping retag"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
           gh release create "${TAG}" \
             --repo "${{ github.repository }}" \
-            --target "${{ github.sha }}" \
             --title "${TAG}" \
             --notes-file fw-release-notes.md \
             release/*.zip release/*-flash.bin

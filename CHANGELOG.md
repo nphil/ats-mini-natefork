@@ -4,6 +4,20 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.36 (2026-05-27)
+
+Best paired with **ATS-Mini Remote iOS app v3.2.x** which now reads the radio's IP/AP/version over BLE and offers one-tap WiFi OTA flashing from the GitHub releases list.
+
+### Added
+
+- BLE status JSON now exposes three OTA-helper fields: `wip` (the device's HTTP OTA IP — STA address when joined to your home Wi-Fi, AP address when in access-point mode), `wm` (WiFi mode: -1/0 off, 1 AP, 2 STA), and `fw` (the running firmware version as an integer, e.g. 236 for v2.36). Used by the iOS app to auto-populate the host field, mark the installed release with an `INSTALLED` badge, and disable the Flash button when the radio isn't reachable.
+- New `getOTAIPAddress()` helper in `Network.cpp` that returns the best IP to POST firmware to — STA if connected, AP IP otherwise.
+
+### Changed
+
+- CI: OSPI-only builds. The QSPI matrix entry was dropped from `build.yml` since the OSPI variant covers every supported ATS-Mini unit. Build time halved, release artifact list trimmed.
+- CI: every push to `main` now auto-bumps `VER_APP` and publishes a `vX.YY` release with the OSPI flash binary attached — no more manual `VER_APP` edits required. Mirrors how `ios.yml` auto-releases `ios-vX.Y.Z`.
+
 ## 2.35 (2026-05-27)
 
 ### Changed
