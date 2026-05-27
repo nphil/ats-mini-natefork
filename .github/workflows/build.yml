@@ -172,8 +172,8 @@ jobs:
           pattern: 'ats-mini-*'
           merge-multiple: true
           path: artifact
-      - name: Archive the build artifacts
-        run: cd "artifact" && find . -mindepth 1 -maxdepth 1 -type d -exec sh -c 'zip -r "../${1%/}.zip" "$1"' _ {} \;
+      - name: Collect flash binary
+        run: find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -184,11 +184,9 @@ jobs:
       - name: Upload release artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          FILENAMES: ${{ github.event.repository.name }}-${{ needs.build.outputs.slug }}-*.zip
           SLUG: ${{ needs.build.outputs.slug }}
         run: |
-          # shellcheck disable=SC2086
-          gh release upload "$SLUG" $FILENAMES --repo '${{ github.repository }}' --clobber
+          gh release upload "$SLUG" ./*-ospi-flash.bin --repo '${{ github.repository }}' --clobber
 
   latest-release:
     # Overwrites the rolling "latest" release on every push to main so the
@@ -215,15 +213,8 @@ jobs:
           merge-multiple: true
           path: artifact
 
-      - name: Package artifacts and collect flash binaries
-        run: |
-          # Create per-variant zip archives (same format as versioned releases)
-          cd artifact
-          find . -mindepth 1 -maxdepth 1 -type d -exec sh -c \
-            'zip -r "../${1#./}.zip" "$1"' _ {} \;
-          cd ..
-          # Copy merged flash binaries to the top level for direct one-click download
-          find artifact -name '*-flash.bin' -exec cp {} . \;
+      - name: Collect flash binary
+        run: find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
 
       - name: Write release notes
         run: |
@@ -255,22 +246,13 @@ jobs:
           > **Auto-updated on every push to \`main\`.**
           > Built from commit \`${SHORT_SHA}\` — ${BUILD_DATE}
 
-          ## ⬇️ Quick Download (ospi — most ATS-Mini units)
+          ## ⬇️ Flash
 
           Download \`ats-mini-${SLUG}-ospi-flash.bin\` and flash with:
 
           \`\`\`
           esptool.py --chip esp32s3 write_flash 0x0 ats-mini-${SLUG}-ospi-flash.bin
           \`\`\`
-
-          ## Variants
-
-          | File | Board PSRAM |
-          |------|-------------|
-          | \`*-ospi-flash.bin\` | Octal SPI — most common ATS-Mini |
-          | \`*-qspi-flash.bin\` | Quad SPI |
-
-          The \`.zip\` files contain individual partition images for OTA / partial updates.
 
           ## What's changed
           EOF
@@ -321,7 +303,7 @@ jobs:
           fi
 
           # Upload new assets (--clobber handles any same-name leftovers)
-          gh release upload latest --repo "${REPO}" --clobber ./*.zip ./*-flash.bin
+          gh release upload latest --repo "${REPO}" --clobber ./*-ospi-flash.bin
 
   firmware-auto-release:
     # Auto-bumps VER_APP and publishes a versioned firmware release on every
@@ -364,18 +346,11 @@ jobs:
           merge-multiple: true
           path: artifact
 
-      - name: Package artifacts with clean version names
+      - name: Collect flash binary with clean version name
         run: |
           mkdir -p release
-          for dir in artifact/*/; do
-            dir="${dir%/}"
-            VARIANT=$(basename "$dir" | rev | cut -d'-' -f1 | rev)   # ospi (or qspi)
-            zip -r "release/ats-mini-${TAG}-${VARIANT}.zip" "$dir"
-          done
-          find artifact -name '*-flash.bin' | while read -r f; do
-            VARIANT=$(basename "$f" | rev | cut -d'-' -f1,2 | rev)   # ospi-flash.bin
-            cp "$f" "release/ats-mini-${TAG}-${VARIANT}"
-          done
+          find artifact -name '*-ospi-flash.bin' -exec \
+            cp {} "release/ats-mini-${TAG}-ospi-flash.bin" \;
 
       - name: Extract changelog section
         run: |
@@ -423,7 +398,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "${TAG}" \
             --notes-file fw-release-notes.md \
-            release/*.zip release/*-flash.bin
+            release/*-ospi-flash.bin
 
       - name: Attach latest iOS IPA to this firmware release
         env:
