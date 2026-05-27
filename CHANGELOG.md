@@ -4,6 +4,17 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.35 (2026-05-27)
+
+### Changed
+
+- Bump settings version (VER_SETTINGS 73→74). The v2.34 theme palette was completely replaced (19 themes → 30 new themes), so any saved theme index now points to a different theme. On first boot after upgrading from v2.34 or earlier the settings are reset to defaults, letting the user pick from the new palette.
+
+### Fixed
+
+- Add bounds check on the saved theme index when loading settings. Prevents a potential out-of-bounds access if NVS holds an index from a build with a different theme count.
+- Skip BLE initialisation at boot if free internal heap is below 80 KB. Prevents a hard crash on devices where the sprite buffer fell back to internal RAM (PSRAM unavailable), consuming heap the BLE stack also needs. Prints free-heap size to the serial console before BLE init to aid diagnosis.
+
 ## 2.34 (2026-05-27)
 
 Best paired with **ATS-Mini Remote iOS app v3.2.0** which adds silent auto-reconnect — the app now remembers and quietly reconnects to the radio after sleep, reboot, or the 5-minute BLE auto-off cycle.

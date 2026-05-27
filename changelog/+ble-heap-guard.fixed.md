@@ -1,0 +1,1 @@
+Skip BLE initialisation at boot if free internal heap is below 80 KB. Prevents a hard crash on devices where the sprite buffer could not be placed in PSRAM and fell back to internal RAM, consuming heap that the BLE stack also needs.

@@ -279,8 +279,20 @@ void setup()
   // BLE always comes up at every boot regardless of what the user (or the
   // auto-off timer) last left it as. The auto-off timer further down the
   // main loop will switch it off after 5 min if nothing connects.
-  bleModeIdx = BLE_ADHOC;
-  bleInit(bleModeIdx);
+  // Guard: BLE stack needs ~70KB of internal SRAM. If heap is critically
+  // low (e.g. sprite fell back to internal RAM due to PSRAM unavailability),
+  // skip init rather than trigger a watchdog crash on the first loop tick.
+  Serial.printf("Free heap before BLE init: %u bytes\n", ESP.getFreeHeap());
+  if(ESP.getFreeHeap() >= 80000)
+  {
+    bleModeIdx = BLE_ADHOC;
+    bleInit(bleModeIdx);
+  }
+  else
+  {
+    Serial.println("WARNING: Low heap, skipping BLE init to avoid crash");
+    bleModeIdx = BLE_OFF;
+  }
 
   // Start low-priority idle-counter tasks for CPU load estimation
   cpuInitTasks();

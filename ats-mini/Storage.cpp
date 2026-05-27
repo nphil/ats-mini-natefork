@@ -279,6 +279,7 @@ bool prefsLoad(uint32_t items)
     SsbSoftMuteIdx = prefs.getUChar("SsbSoftMute", SsbSoftMuteIdx); // SSB soft mute
     currentSleep   = prefs.getUShort("Sleep", currentSleep);    // Sleep delay
     themeIdx       = prefs.getUChar("Theme", themeIdx);         // Color theme
+    if(themeIdx >= (uint8_t)getTotalThemes()) themeIdx = 0;   // clamp — theme count changed in v2.35
     rdsModeIdx     = prefs.getUChar("RDSMode", rdsModeIdx);     // RDS mode
     if(rdsModeIdx > 1) rdsModeIdx = 1;  // clamp to new 2-option range
     sleepModeIdx   = prefs.getUChar("SleepMode", sleepModeIdx); // Sleep mode

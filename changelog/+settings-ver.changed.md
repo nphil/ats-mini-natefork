@@ -1,0 +1,1 @@
+Bump settings version (VER_SETTINGS 73→74). The v2.34 theme palette was completely replaced (19 themes → 30 new themes), so any saved theme index now points to a different theme. On first boot after upgrading from v2.34 or earlier the settings are reset to defaults, which lets the user pick a theme from the new palette rather than silently landing on the wrong one.
