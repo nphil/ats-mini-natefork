@@ -29,9 +29,59 @@ final class BLEManager: NSObject, ObservableObject {
 
     weak var radio: RadioState?
 
+    // MARK: - Auto-reconnect
+
+    /// CoreBluetooth peripheral UUID of the last successfully-connected radio.
+    /// Persisted so the app can quietly reconnect every time the radio comes
+    /// back online (e.g. after the firmware's 5-min BLE auto-off + new boot).
+    private static let lastPeripheralKey = "atsmini.ble.lastPeripheralUUID"
+
+    private var lastPeripheralUUID: UUID? {
+        get {
+            UserDefaults.standard.string(forKey: Self.lastPeripheralKey).flatMap(UUID.init)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.uuidString, forKey: Self.lastPeripheralKey)
+        }
+    }
+
+    /// When true, scan results matching the persisted peripheral UUID auto-connect.
+    /// Reset when the user explicitly disconnects so we don't bounce back on them.
+    private var autoReconnectEnabled = true
+
     private override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    // MARK: - Auto-reconnect entry points
+
+    /// Called once at app launch (or whenever Bluetooth becomes available).
+    /// If we know the UUID of the last connected radio, try a fast direct
+    /// reconnect via CoreBluetooth's known-peripheral cache; otherwise fall
+    /// back to a passive scan that picks the radio up when it advertises.
+    func beginAutoReconnect() {
+        guard autoReconnectEnabled,
+              centralManager.state == .poweredOn,
+              !isConnected else { return }
+
+        if let saved = lastPeripheralUUID,
+           let known = centralManager.retrievePeripherals(withIdentifiers: [saved]).first {
+            radio?.log("Auto-reconnecting to last ATS-Mini…")
+            connect(to: known, isAuto: true)
+            return
+        }
+
+        // No cached peripheral handle — passive scan so we connect as soon as
+        // the radio re-advertises. This is silent in the UI: no "Scanning…"
+        // label, no auto-stop timeout, no user prompt.
+        startBackgroundScan()
+    }
+
+    private func startBackgroundScan() {
+        guard centralManager.state == .poweredOn, !isScanning else { return }
+        isScanning = true
+        centralManager.scanForPeripherals(withServices: [serviceUUID], options: nil)
     }
 
     func startScan() {
@@ -59,14 +109,24 @@ final class BLEManager: NSObject, ObservableObject {
     }
 
     func connect(to peripheral: CBPeripheral) {
+        connect(to: peripheral, isAuto: false)
+    }
+
+    private func connect(to peripheral: CBPeripheral, isAuto: Bool) {
         stopScan()
         self.peripheral = peripheral
         peripheral.delegate = self
-        radio?.connectionStatus = "Connecting..."
+        radio?.connectionStatus = isAuto ? "Reconnecting…" : "Connecting..."
+        // Any user-initiated connect re-enables auto-reconnect for next time
+        if !isAuto { autoReconnectEnabled = true }
         centralManager.connect(peripheral, options: nil)
     }
 
     func disconnect() {
+        // Explicit user disconnect: forget the saved peripheral so we don't
+        // immediately reconnect to a radio they just deliberately released.
+        autoReconnectEnabled = false
+        lastPeripheralUUID = nil
         if let p = peripheral {
             centralManager.cancelPeripheralConnection(p)
         }
@@ -315,7 +375,10 @@ final class BLEManager: NSObject, ObservableObject {
 
 extension BLEManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state != .poweredOn {
+        if central.state == .poweredOn {
+            // Bluetooth just came up — try the silent reconnect path now.
+            beginAutoReconnect()
+        } else {
             radio?.log("Bluetooth: \(central.state.rawValue)", type: .error)
         }
     }
@@ -326,7 +389,18 @@ extension BLEManager: CBCentralManagerDelegate {
             discoveredDevices.append(peripheral)
             radio?.log("Found: \(peripheral.name ?? peripheral.identifier.uuidString)")
         }
-        // Auto-connect after OTA reboot
+
+        // Path 1: auto-reconnect by remembered UUID (silent — fires whenever
+        // the last-known radio re-advertises, e.g. after its 5-min BLE
+        // auto-off cycle or a power-on).
+        if autoReconnectEnabled,
+           let saved = lastPeripheralUUID,
+           peripheral.identifier == saved {
+            connect(to: peripheral, isAuto: true)
+            return
+        }
+
+        // Path 2: auto-connect by name after an OTA reboot (existing behavior).
         if let target = autoConnectName, peripheral.name == target {
             autoConnectName = nil
             connect(to: peripheral)
@@ -335,6 +409,10 @@ extension BLEManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         connectedPeripheralName = peripheral.name
+        // Remember this peripheral for silent reconnect on next launch / next
+        // time the radio comes online.
+        lastPeripheralUUID = peripheral.identifier
+        autoReconnectEnabled = true
         radio?.log("Connected to \(peripheral.name ?? "device")", type: .ok)
         peripheral.discoverServices([serviceUUID])
     }
@@ -345,6 +423,10 @@ extension BLEManager: CBCentralManagerDelegate {
             self.radio?.connectionStatus = "Failed"
         }
         radio?.log("Connection failed: \(error?.localizedDescription ?? "unknown")", type: .error)
+
+        // Failed during a silent reconnect attempt → fall back to a passive
+        // background scan so we still pick the radio up when it advertises.
+        if autoReconnectEnabled { startBackgroundScan() }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -355,6 +437,12 @@ extension BLEManager: CBCentralManagerDelegate {
         rxCharacteristic = nil
         txCharacteristic = nil
         radio?.log("Disconnected")
+
+        // Involuntary disconnect (firmware sleep, out of range, BLE auto-off):
+        // immediately start a quiet background scan so we reconnect the moment
+        // the radio reappears. User-initiated disconnect() turned this off
+        // already, so we won't fight them.
+        if autoReconnectEnabled { startBackgroundScan() }
     }
 }
 

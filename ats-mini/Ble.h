@@ -70,23 +70,53 @@ public:
 
   void stop()
   {
+    // Critical: set this *first* so any onDisconnect callback that fires
+    // mid-teardown bails out instead of touching torn-down state. Previously
+    // the disconnect that BLEDevice::deinit() generates would re-enter
+    // pServer->getAdvertising()->start() on an already-destroyed server,
+    // and call dataConsumed.release() a second time (binary_semaphore
+    // overflow → UB) — that's the crash users hit when BLE was connected
+    // and the radio entered light sleep.
+    if (!started) return;
+    started = false;
+
     pServer = BLEDevice::getServer();
     if (pServer)
     {
+      // Stop advertising and gracefully disconnect any active clients before
+      // tearing down the GATT structures.
       pServer->getAdvertising()->stop();
-      pService->stop();
 
-      pService->removeCharacteristic(pRxCharacteristic, true);
-      pRxCharacteristic = nullptr;
+      if (pServer->getConnectedCount() > 0)
+      {
+        // Walk every active connection and request a clean disconnect.
+        auto peerInfo = pServer->getPeerDevices(true);
+        for (auto& p : peerInfo) pServer->disconnect(p.first);
+        // Give the host task a beat to process disconnect events so they
+        // don't race with the service/characteristic teardown below.
+        delay(50);
+      }
 
-      pService->removeCharacteristic(pTxCharacteristic, true);
-      pTxCharacteristic = nullptr;
+      if (pService)
+      {
+        pService->stop();
 
-      pServer->removeService(pService);
-      pService = nullptr;
+        if (pRxCharacteristic)
+        {
+          pService->removeCharacteristic(pRxCharacteristic, true);
+          pRxCharacteristic = nullptr;
+        }
+        if (pTxCharacteristic)
+        {
+          pService->removeCharacteristic(pTxCharacteristic, true);
+          pTxCharacteristic = nullptr;
+        }
+
+        pServer->removeService(pService);
+        pService = nullptr;
+      }
     }
     BLEDevice::deinit(false);
-    started = false;
   }
 
   bool isStarted()
@@ -101,6 +131,10 @@ public:
   }
 
   void onDisconnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
+    // If stop() is mid-teardown, skip everything. Touching the semaphore
+    // (release-after-release is UB) or restarting advertising on a server
+    // that's being deinitialised was the source of the sleep-time crash.
+    if (!started) return;
     dataConsumed.release();
     pServer->getAdvertising()->start();
   }

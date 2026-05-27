@@ -35,7 +35,11 @@ void bleInit(uint8_t bleMode)
 int bleDoCommand(Stream* stream, RemoteState* state, uint8_t bleMode)
 {
   if(bleMode == BLE_OFF) return 0;
-  if(BLEDevice::getServer()->getConnectedCount() == 0) return 0;
+  // Guard against teardown races: isStarted() flips false before stop()
+  // tears down the server, so check it before dereferencing getServer().
+  if(!BLESerial.isStarted()) return 0;
+  BLEServer* srv = BLEDevice::getServer();
+  if(!srv || srv->getConnectedCount() == 0) return 0;
   if(!BLESerial.available()) return 0;
 
   // JSON command: peek for opening brace, read full packet, dispatch
@@ -56,7 +60,12 @@ int bleDoCommand(Stream* stream, RemoteState* state, uint8_t bleMode)
 void remoteBLETickTime(Stream* stream, RemoteState* state, uint8_t bleMode)
 {
   if(bleMode == BLE_OFF) return;
+  // Same teardown guard as bleDoCommand(): without this, the periodic status
+  // tick can race with bleStop() and dereference a null/destroyed server.
+  if(!BLESerial.isStarted()) return;
+  BLEServer* srv = BLEDevice::getServer();
+  if(!srv) return;
 
-  if (BLEDevice::getServer()->getConnectedCount() > 0)
+  if (srv->getConnectedCount() > 0)
     remoteTickTime(stream, state);
 }

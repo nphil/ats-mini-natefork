@@ -1,29 +1,19 @@
-## ATS-Mini Remote 3.1.0 — Theming + single-screen Radio
+## ATS-Mini Remote 3.2.0 — Silent auto-reconnect
 
-Builds on the 3.0.0 navigation refresh by porting the full HomeBoy theme system, consolidating the Radio tab onto a single screen with no scroll, and fixing the toolbar Bluetooth pill.
+The app now remembers the last ATS-Mini you connected to and quietly reconnects whenever it comes back online — no more manually tapping the Bluetooth pill after the radio sleeps, reboots, or finishes its 5-minute BLE auto-off cycle.
 
-### Theming
-- **30 color themes** ported from the Homebox / HomeBoy palette: Homebox, Light, Dark, Forest, Garden, Emerald, Aqua, Ocean, Night, Dracula, Synthwave, Halloween, Coffee, Business, Luxury, Black, Cupcake, Valentine, Pastel, Fantasy, Retro, Bumblebee, Lemonade, Corporate, CMYK, Autumn, Winter, Acid, Cyberpunk, Wireframe, Lo-Fi
-- Solid backgrounds (no gradients), HSL-driven, persisted across launches
-- Light / dark color scheme follows the active theme's background lightness automatically
-- Theme picker in **Settings → Appearance** with circular swatches in a 4-column grid
+### Auto-reconnect
+- The peripheral UUID of the last connected radio is persisted to UserDefaults
+- On launch (or whenever Bluetooth becomes available), the app does a fast `retrievePeripherals` lookup and connects immediately if the radio is already discoverable
+- If not, it falls into a quiet background scan and connects the moment the radio re-advertises
+- Involuntary disconnects (radio sleeps, out of range, firmware's 5-min BLE auto-off) trigger the same background scan automatically
+- Tapping **Disconnect** explicitly forgets the saved peripheral so the app won't fight you and reconnect
 
-### Radio screen — fits one screen, no scroll
-- Removed the duplicate Band / Mode / Step / BW chip row from the Frequency card (the same info now appears in Controls right below)
-- Controls replaces 5 stacked +/− rows with a wrap-flowing row of compact popup-menu pills (Band, Mode, Step, BW, AGC). Each pill shows the current value and tap exposes Next / Previous
-- Signal card collapsed: RSSI / SNR / Battery as a single row of mini meters, CPU 0 / CPU 1 / Seq on a thin pill row underneath
-- Inline navigation titles throughout — reclaims vertical space
-
-### Toolbar Bluetooth pill
-- The previous pill (tiny dot in a glass capsule) was hard to read. Replaced with a 34pt circular button using a recognizable BLE icon — slashed antenna when disconnected, dotted radiowaves when connected — theme-tinted, with a soft pulsing ring while connected.
-
-### Settings
-- New **Appearance** section above Firmware
-- New **About** section with version, build, GitHub link
-- Renamed `FirmwareUpdateView` → `SettingsView` for clarity
-
-### Misc
-- New `CLAUDE.md` at the repo root documenting workflow + design preferences for future automation
+### Paired firmware update (v234)
+Best paired with ATS-Mini firmware **v234** which:
+- Always enables BLE at every boot (5 min, then auto-off at runtime if no client connects)
+- Fixes a crash when the radio enters light sleep with a BLE client still connected
+- Ships 30 new themes matching the iOS app palette (Homebox, Dark, Forest, Ocean, Dracula, Synthwave, Cyberpunk, etc.) so the device and the app look consistent
 
 ---
 
