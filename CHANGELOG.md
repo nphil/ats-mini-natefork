@@ -4,6 +4,12 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.44 (2026-05-28)
+
+### Fixed
+
+- **BLE semaphore no longer constructed at global init time.** `std::binary_semaphore` inside the global `NordicUART BLESerial` object was being initialised before the FreeRTOS scheduler started (C++ global constructors run before `app_main()`). On this toolchain the semaphore's constructor internally calls into the FreeRTOS/pthreads layer, which crashes before the scheduler is up. Replaced with a `SemaphoreHandle_t` that is created lazily inside `BLESerial.start()` — the first point at which FreeRTOS is guaranteed to be running. This should fix the persistent bootloop on all hardware.
+
 ## 2.43 (2026-05-27)
 
 ### Fixed

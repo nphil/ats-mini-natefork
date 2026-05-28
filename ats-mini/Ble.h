@@ -6,7 +6,8 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include "host/ble_gap.h"
-#include <semaphore>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "Remote.h"
 
@@ -23,7 +24,9 @@ private:
 
   bool started;
 
-  std::binary_semaphore dataConsumed{1};
+  // Created in start() once FreeRTOS is running; nullptr before that.
+  // Starts in the "given" state (slot available for new incoming data).
+  SemaphoreHandle_t dataConsumed;
   String incomingPacket;
   size_t unreadByteCount = 0;
 
@@ -32,6 +35,7 @@ private:
 public:
   NordicUART(const char *name) : deviceName(name) {
     started = false;
+    dataConsumed = nullptr;
     pServer = nullptr;
     pService = nullptr;
     pTxCharacteristic = nullptr;
@@ -40,6 +44,14 @@ public:
 
   void start()
   {
+    // Create the semaphore here (FreeRTOS is running by the time start() is called).
+    // xSemaphoreCreateBinary starts in the "taken" state; give it once so the first
+    // onWrite() can acquire it immediately.
+    if (!dataConsumed) {
+      dataConsumed = xSemaphoreCreateBinary();
+      xSemaphoreGive(dataConsumed);
+    }
+
     BLEDevice::init(deviceName);
     BLEDevice::setPower(ESP_PWR_LVL_N0);
     BLEDevice::getAdvertising()->setName(deviceName);
@@ -69,6 +81,9 @@ public:
     if (!started) return;
     started = false;
 
+    // Unblock any onWrite() that is waiting to acquire the semaphore.
+    if (dataConsumed) xSemaphoreGive(dataConsumed);
+
     pServer = BLEDevice::getServer();
     if (pServer)
     {
@@ -91,6 +106,8 @@ public:
       }
     }
     BLEDevice::deinit(false);
+
+    if (dataConsumed) { vSemaphoreDelete(dataConsumed); dataConsumed = nullptr; }
   }
 
   bool isStarted() { return started; }
@@ -103,15 +120,15 @@ public:
 
   void onDisconnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
     if (!started) return;
-    dataConsumed.release();
+    if (dataConsumed) xSemaphoreGive(dataConsumed);
     pServer->getAdvertising()->start();
   }
 
   void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc)
   {
-    if (pCharacteristic == pRxCharacteristic)
+    if (pCharacteristic == pRxCharacteristic && dataConsumed)
     {
-      dataConsumed.acquire();
+      xSemaphoreTake(dataConsumed, portMAX_DELAY);
       incomingPacket = pCharacteristic->getValue();
       unreadByteCount = incomingPacket.length();
     }
@@ -129,7 +146,7 @@ public:
   int read() override {
     if (unreadByteCount == 0) return -1;
     int result = incomingPacket[incomingPacket.length() - unreadByteCount];
-    if (--unreadByteCount == 0) dataConsumed.release();
+    if (--unreadByteCount == 0 && dataConsumed) xSemaphoreGive(dataConsumed);
     return result;
   }
 
