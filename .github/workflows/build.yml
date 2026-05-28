@@ -160,12 +160,30 @@ jobs:
           # partition 0 as the OTA boot target (required for a clean first flash).
           BOOT_APP0=$(find ~/.arduino15 -name "boot_app0.bin" | head -1)
 
+          SLUG="ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}"
+
+          # Standard merged binary (~1.7 MB) — flash at 0x0 for normal updates
           python3 -m esptool \
             --chip esp32s3 merge_bin \
-            --output "$ARTIFACT/ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}-flash.bin" \
+            --output "$ARTIFACT/${SLUG}-flash.bin" \
             --flash_mode qio \
             --flash_freq 80m \
             --flash_size 8MB \
+            0x0    "$ARTIFACT"/*.ino.bootloader.bin \
+            0x8000 "$ARTIFACT"/*.ino.partitions.bin \
+            0xe000 "$BOOT_APP0" \
+            0x10000 "$ARTIFACT"/*.ino.bin
+
+          # Full 8 MB image — pads unused regions with 0xFF so every byte of
+          # flash is overwritten, removing any stale data from previous flashes.
+          # Use this when the device is in an unknown/corrupt state.
+          python3 -m esptool \
+            --chip esp32s3 merge_bin \
+            --output "$ARTIFACT/${SLUG}-full.bin" \
+            --flash_mode qio \
+            --flash_freq 80m \
+            --flash_size 8MB \
+            --fill-flash-size 8MB \
             0x0    "$ARTIFACT"/*.ino.bootloader.bin \
             0x8000 "$ARTIFACT"/*.ino.partitions.bin \
             0xe000 "$BOOT_APP0" \
@@ -196,6 +214,7 @@ jobs:
       - name: Collect release binaries
         run: |
           find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
+          find artifact -name '*-ospi-full.bin'  -exec cp {} . \;
           find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
             -exec cp {} "ats-mini-${{ needs.build.outputs.slug }}-ospi-ota.bin" \;
       - name: Create release
@@ -210,7 +229,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           SLUG: ${{ needs.build.outputs.slug }}
         run: |
-          gh release upload "$SLUG" ./*-ospi-flash.bin ./*-ospi-ota.bin --repo '${{ github.repository }}' --clobber
+          gh release upload "$SLUG" ./*-ospi-flash.bin ./*-ospi-full.bin ./*-ospi-ota.bin --repo '${{ github.repository }}' --clobber
 
   latest-release:
     # Overwrites the rolling "latest" release on every push to main so the
@@ -240,6 +259,7 @@ jobs:
       - name: Collect release binaries
         run: |
           find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
+          find artifact -name '*-ospi-full.bin'  -exec cp {} . \;
           find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
             -exec cp {} "ats-mini-${{ needs.build.outputs.slug }}-ospi-ota.bin" \;
 
@@ -330,7 +350,7 @@ jobs:
           fi
 
           # Upload new assets (--clobber handles any same-name leftovers)
-          gh release upload latest --repo "${REPO}" --clobber ./*-ospi-flash.bin ./*-ospi-ota.bin
+          gh release upload latest --repo "${REPO}" --clobber ./*-ospi-flash.bin ./*-ospi-full.bin ./*-ospi-ota.bin
 
   firmware-auto-release:
     # Auto-bumps VER_APP and publishes a versioned firmware release on every
@@ -379,6 +399,9 @@ jobs:
           # Merged binary for esptool (flash at 0x0)
           find artifact -name '*-ospi-flash.bin' -exec \
             cp {} "release/ats-mini-${TAG}-ospi-flash.bin" \;
+          # Full 8MB binary — overwrites every flash byte (use when device is in unknown state)
+          find artifact -name '*-ospi-full.bin' -exec \
+            cp {} "release/ats-mini-${TAG}-ospi-full.bin" \;
           # Raw app binary for web OTA upload
           find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' -exec \
             cp {} "release/ats-mini-${TAG}-ospi-ota.bin" \;
@@ -430,6 +453,7 @@ jobs:
             --title "${TAG}" \
             --notes-file fw-release-notes.md \
             release/*-ospi-flash.bin \
+            release/*-ospi-full.bin \
             release/*-ospi-ota.bin
 
       - name: Attach latest iOS IPA to this firmware release
