@@ -215,6 +215,7 @@ void prefsSave(uint32_t items)
 
     prefs.putUChar("CPUDisplay",  cpuDisplayIdx);  // CPU usage display
     prefs.putUChar("CPUFreq",     cpuFreqIdx);     // CPU frequency index
+    prefs.putUChar("BattDisp",    batteryDisplayMode); // Battery display mode
 
     // Done with global settings
     prefs.end();
@@ -291,6 +292,8 @@ bool prefsLoad(uint32_t items)
     usbModeIdx     = prefs.getUChar("USBMode",    usbModeIdx);    // USB mode
     cpuDisplayIdx  = prefs.getUChar("CPUDisplay", 0);              // CPU usage display
     cpuFreqIdx     = prefs.getUChar("CPUFreq",    0);              // CPU frequency index
+    batteryDisplayMode = prefs.getUChar("BattDisp", 0);            // Battery display mode
+    if (batteryDisplayMode > 2) batteryDisplayMode = 0;
     // Apply saved CPU frequency
     { const int freqs[] = {80, 160, 240}; if (cpuFreqIdx < 3) setCpuFrequencyMhz(freqs[cpuFreqIdx]); }
 

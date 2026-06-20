@@ -154,26 +154,16 @@ void netInit(uint8_t netMode, bool showStatus)
     case NET_OFF:
       // Do not initialize WiFi if disabled
       return;
-    case NET_AP_ONLY:
-      // Start WiFi access point if requested
-      WiFi.mode(WIFI_AP);
-      // Let user see connection status if successful
-      if(wifiInitAP() && showStatus) delay(2000);
-      break;
-    case NET_AP_CONNECT:
-      // Start WiFi access point if requested
-      WiFi.mode(WIFI_AP_STA);
-      // Let user see connection status if successful
-      if(wifiInitAP() && showStatus) delay(2000);
-      break;
     default:
       // No access point
       WiFi.mode(WIFI_STA);
       break;
   }
 
+  WiFi.setAutoReconnect(true);
+
   // Initialize WiFi and try connecting to a network
-  if(netMode>NET_AP_ONLY && wifiConnect())
+  if(netMode != NET_OFF && wifiConnect())
   {
     // Let user see connection status if successful
     if(netMode!=NET_SYNC && showStatus) delay(2000);
@@ -202,6 +192,57 @@ void netInit(uint8_t netMode, bool showStatus)
     // Initialize mDNS
     MDNS.begin("atsmini"); // Set the hostname to "atsmini.local"
     MDNS.addService("http", "tcp", 80);
+  }
+}
+
+bool internetConnected = false;
+static TaskHandle_t wifiCheckTaskHandle = NULL;
+
+static void wifiCheckTask(void *pvParameters)
+{
+  while (true)
+  {
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      IPAddress ip;
+      int err = WiFi.hostByName("google.com", ip);
+      if (err == 1)
+      {
+        internetConnected = true;
+      }
+      else
+      {
+        err = WiFi.hostByName("one.one.one.one", ip);
+        internetConnected = (err == 1);
+      }
+    }
+    else
+    {
+      internetConnected = false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10000));
+  }
+}
+
+void netInitServices()
+{
+  ntpClient.setUpdateInterval(5*60*1000);
+  clockReset();
+  webInit();
+  MDNS.begin("atsmini");
+  MDNS.addService("http", "tcp", 80);
+
+  if (wifiCheckTaskHandle == NULL)
+  {
+    xTaskCreatePinnedToCore(
+      wifiCheckTask,
+      "wifiCheck",
+      3072,
+      NULL,
+      1,
+      &wifiCheckTaskHandle,
+      1
+    );
   }
 }
 

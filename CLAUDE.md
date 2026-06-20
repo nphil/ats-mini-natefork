@@ -118,19 +118,30 @@ attempt — i.e. a boot loop.
   `*-ospi-ota.bin`, and an always-on serial JSON OTA protocol for the
   Android app.
 
-### ESP32 Arduino 3.x include gotchas (recovery sketch)
+### ESP32 Arduino 3.x / ESP32-S3 Core 3.3.10 Constraints
 
 - `FS` moved into `namespace fs`. Put `#include <FS.h>` + `using namespace
   fs;` **before** `#include <WebServer.h>` or you get `'FS' was not
   declared in this scope`. Include `<TFT_eSPI.h>` **last**.
 - A new core `Network` class collides with any user-defined `struct
   Network` — name such structs something else (e.g. `KnownNet`).
+- **Core 3.3.10 Boot crash (IPC1 Stack Canary watchpoint)**: Standard Arduino
+  `attachInterrupt()` triggers a cross-core IPC call to install the GPIO ISR service.
+  Under Core 3.3.10, the precompiled stack size of the `ipc1` inter-core task is `1024` bytes.
+  Memory allocations in this call exceed 1024 bytes and immediately trigger a stack
+  canary Guru Meditation crash before `setup()`'s serial prints are reached.
+  *Durable Workaround*: Always call `gpio_install_isr_service(0);` at the very beginning
+  of `setup()` in the main app after including `<driver/gpio.h>` to allocate the interrupt
+  service locally on Core 1 (8KB stack).
 
 ### Flashing & unbricking
 
 - CI publishes `-flash.bin` (defined regions only — preserves LittleFS) and
   `-full.bin` (8 MB, every byte filled — for bricked/unknown state). Both
   flash at `0x0`.
+- **Compilation Output**: When using `arduino-cli compile --profile esp32s3-ospi`, you
+  **MUST** specify the `--export-binaries` flag. Without it, the binary is not written to
+  the local `build/` folders, and flashing commands will upload stale files.
 - **Desktop unbrick** (the definitive recovery, verified working):
   ```
   esptool --chip esp32s3 erase_flash

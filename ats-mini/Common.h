@@ -175,6 +175,10 @@ extern uint8_t usbModeIdx;
 extern uint8_t bleModeIdx;
 extern uint8_t wifiModeIdx;
 extern uint8_t FmRegionIdx;
+extern uint8_t batteryDisplayMode;
+extern int16_t cachedWiFiRSSI;
+extern bool internetConnected;
+void updateWiFiRSSI();
 
 extern int8_t agcIdx;
 extern int8_t agcNdx;
@@ -236,6 +240,7 @@ int8_t getWiFiStatus();
 char *getWiFiIPAddress();
 char *getOTAIPAddress();
 void netInit(uint8_t netMode, bool showStatus = true);
+void netInitServices();
 void netStop();
 bool ntpIsAvailable();
 bool ntpSyncTime();

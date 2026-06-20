@@ -385,13 +385,65 @@ static bool eibiParseLine(const char *line, StationSchedule &entry)
   return(true);
 }
 
+int eibiGetCount()
+{
+  fs::File file = LittleFS.open(EIBI_PATH, "rb");
+  if (!file) return 0;
+  int count = file.size() / sizeof(StationSchedule);
+  file.close();
+  return count;
+}
+
+bool eibiReadEntry(int index, StationSchedule *entry)
+{
+  fs::File file = LittleFS.open(EIBI_PATH, "rb");
+  if (!file) return false;
+
+  bool ok = file.seek((size_t)index * sizeof(StationSchedule), fs::SeekSet) &&
+            file.read((uint8_t*)entry, sizeof(StationSchedule)) == sizeof(StationSchedule);
+  file.close();
+  return ok;
+}
+
+int eibiReadEntries(int startIndex, StationSchedule *entries, int maxCount)
+{
+  fs::File file = LittleFS.open(EIBI_PATH, "rb");
+  if (!file) return 0;
+
+  int totalEntries = file.size() / sizeof(StationSchedule);
+  if (startIndex >= totalEntries) { file.close(); return 0; }
+
+  if (!file.seek((size_t)startIndex * sizeof(StationSchedule), fs::SeekSet))
+  {
+    file.close();
+    return 0;
+  }
+
+  int readCount = min(maxCount, totalEntries - startIndex);
+  int actualRead = 0;
+  for (int i = 0; i < readCount; i++)
+  {
+    if (file.read((uint8_t*)&entries[i], sizeof(StationSchedule)) != sizeof(StationSchedule))
+      break;
+    actualRead++;
+  }
+
+  file.close();
+  return actualRead;
+}
+
 bool eibiLoadSchedule()
 {
   static const char *eibiMessage = "Loading EiBi Schedule";
   HTTPClient http;
 
   // Need to be connected to the network
-  if(getWiFiStatus() < 2) return(false);
+  if(getWiFiStatus() < 2)
+  {
+    drawScreen(eibiMessage, "No WiFi connection!");
+    delay(2500);
+    return(false);
+  }
 
   drawScreen(eibiMessage, "Connecting...");
 
@@ -401,6 +453,7 @@ bool eibiLoadSchedule()
   {
     drawScreen(eibiMessage, "Failed connecting to EiBi!");
     http.end();
+    delay(2500);
     return(false);
   }
 
@@ -410,6 +463,7 @@ bool eibiLoadSchedule()
   {
     drawScreen(eibiMessage, "Failed opening local storage!");
     http.end();
+    delay(2500);
     return(false);
   }
 
@@ -431,6 +485,7 @@ bool eibiLoadSchedule()
       http.end();
       LittleFS.remove(TEMP_PATH);
       drawScreen(eibiMessage, "CANCELED!");
+      delay(2000);
       return(false);
     }
 
@@ -491,6 +546,9 @@ bool eibiLoadSchedule()
 
   // Success
   identifyFrequency(currentFrequency + currentBFO / 1000);
-  drawScreen(eibiMessage, "DONE!");
+  char successMessage[64];
+  sprintf(successMessage, "%d entries updated!", lineCnt);
+  drawScreen(eibiMessage, successMessage);
+  delay(3000);
   return(true);
 }

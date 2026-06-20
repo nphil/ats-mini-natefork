@@ -2,6 +2,7 @@
 // INCLUDE FILES
 // =================================
 
+#include <driver/gpio.h>
 #include "Common.h"
 #include <Wire.h>
 #include <Preferences.h>
@@ -16,6 +17,7 @@
 #include "EIBI.h"
 #include "Remote.h"
 #include "Ble.h"
+#include <WiFi.h>
 
 // SI473/5 and UI
 #define MIN_ELAPSED_TIME         5  // 300
@@ -95,6 +97,7 @@ int16_t  currentBFO  = 0;
 
 uint8_t  rssi = 0;
 uint8_t  snr  = 0;
+int16_t  cachedWiFiRSSI = -100;
 
 //
 // Remotes
@@ -119,6 +122,11 @@ void setup()
 {
   // Enable serial port
   Serial.begin(115200);
+  Serial.println("ATS-Mini starting...");
+  Serial.printf("setup() is running on Core %d\n", xPortGetCoreID());
+
+  // Install GPIO ISR service locally on Core 1 to avoid Arduino core doing it via IPC which overflows the ipc1 task stack
+  gpio_install_isr_service(0);
 
   // Encoder pins. Enable internal pull-ups
   pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
@@ -284,8 +292,14 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
 
-  // Connect WiFi, if necessary
-  netInit(wifiModeIdx);
+  // Initialize Wi-Fi enabled state based on loaded preferences
+  wifiEnabled = (wifiModeIdx != NET_OFF) ? 1 : 0;
+
+  // Connect WiFi asynchronously, if necessary
+  if (wifiEnabled)
+  {
+    wifiStartAutoConnect();
+  }
 
   // BLE always comes up at every boot regardless of what the user (or the
   // auto-off timer) last left it as. The auto-off timer further down the
@@ -784,6 +798,19 @@ bool processRssiSnr()
   return needRedraw;
 }
 
+void updateWiFiRSSI()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    int16_t rssiVal = WiFi.RSSI();
+    cachedWiFiRSSI = (rssiVal < 0) ? rssiVal : -100;
+  }
+  else
+  {
+    cachedWiFiRSSI = -100;
+  }
+}
+
 //
 // Main event loop
 //
@@ -791,6 +818,8 @@ void loop()
 {
   uint32_t currentTime = millis();
   bool needRedraw = false;
+
+  wifiScanTick();
 
   uint32_t encCounts = consumeEncoderCounts();
   int16_t encCount = (int16_t)(encCounts & 0xFFFF);
@@ -895,13 +924,34 @@ void loop()
       // Reset timeouts
       elapsedSleep = elapsedCommand = currentTime;
     }
-    else if(pb1st.isLongPressed && pb1.getPressedDuration() >= HOLD_SLEEP_MS)
+    else if(pb1st.isLongPressed)
     {
-      // Encoder held long enough (3 s): toggle display sleep
-      sleepOn(!sleepOn());
-      // CPU sleep can take long time, renew the timestamps
-      elapsedSleep = elapsedCommand = currentTime = millis();
-
+      if (currentCmd == CMD_WIFI_NETWORKS || currentCmd == CMD_WIFI_KEYBOARD ||
+          currentCmd == CMD_WIFI_CONNECTING || currentCmd == CMD_WIFI_CONNECT_FAILED)
+      {
+        currentCmd = CMD_WIFIMODE;
+        needRedraw = true;
+        if (wifiEnabled == 0)
+        {
+          netInit(NET_OFF);
+        }
+        // Wait for release
+        while(digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(10);
+      }
+      else if (currentCmd == CMD_EIBI_BROWSE)
+      {
+        currentCmd = CMD_EIBI_MENU;
+        needRedraw = true;
+        // Wait for release
+        while(digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(10);
+      }
+      else if (pb1.getPressedDuration() >= HOLD_SLEEP_MS)
+      {
+        // Encoder held long enough (3 s): toggle display sleep
+        sleepOn(!sleepOn());
+        // CPU sleep can take long time, renew the timestamps
+        elapsedSleep = elapsedCommand = currentTime = millis();
+      }
     }
     else if(pb1st.wasClicked || pb1st.wasShortPressed)
     {
@@ -940,6 +990,15 @@ void loop()
       else if(currentCmd != CMD_NONE)
       {
         // Deactivate modal mode
+        if (currentCmd == CMD_WIFI_NETWORKS || currentCmd == CMD_WIFI_KEYBOARD || 
+            currentCmd == CMD_WIFIMODE || currentCmd == CMD_WIFI_STATE ||
+            currentCmd == CMD_WIFI_CONNECTING || currentCmd == CMD_WIFI_CONNECT_FAILED)
+        {
+          if (wifiEnabled == 0)
+          {
+            netInit(NET_OFF);
+          }
+        }
         currentCmd = CMD_NONE;
         needRedraw = true;
       }
@@ -969,8 +1028,19 @@ void loop()
   if((currentTime - elapsedCommand) > ELAPSED_COMMAND)
   {
     // if(getCpuFrequencyMhz()!=80) setCpuFrequencyMhz(80);
-    if(currentCmd != CMD_NONE && currentCmd != CMD_SEEK && currentCmd != CMD_SCAN && currentCmd != CMD_MEMORY)
+    if(currentCmd != CMD_NONE && currentCmd != CMD_SEEK && currentCmd != CMD_SCAN && currentCmd != CMD_MEMORY &&
+       currentCmd != CMD_WIFI_NETWORKS && currentCmd != CMD_WIFI_KEYBOARD &&
+       currentCmd != CMD_WIFI_CONNECTING && currentCmd != CMD_WIFI_CONNECT_FAILED &&
+       currentCmd != CMD_EIBI_BROWSE)
     {
+      if (currentCmd == CMD_WIFIMODE || currentCmd == CMD_WIFI_STATE ||
+          currentCmd == CMD_WIFI_CONNECTING || currentCmd == CMD_WIFI_CONNECT_FAILED)
+      {
+        if (wifiEnabled == 0)
+        {
+          netInit(NET_OFF);
+        }
+      }
       currentCmd = CMD_NONE;
       needRedraw = true;
     }
@@ -1053,6 +1123,17 @@ void loop()
   // Tick NETWORK time, connecting to WiFi if requested
   netTickTime();
 
+  // Tick WiFi connecting status
+  needRedraw |= wifiConnectTick();
+
+  // Periodically check WiFi RSSI
+  static uint32_t lastWiFiRSSICheck = 0;
+  if (currentTime - lastWiFiRSSICheck >= 5000)
+  {
+    updateWiFiRSSI();
+    lastWiFiRSSICheck = currentTime;
+  }
+
   // Run clock
   needRedraw |= clockTickTime();
 
@@ -1069,7 +1150,17 @@ void loop()
   }
 
   // Redraw screen if necessary
-  if(needRedraw) drawScreen();
+  if(needRedraw)
+  {
+    if (wifiToastActive)
+    {
+      drawScreen(wifiToastLine1.c_str(), wifiToastLine2.c_str());
+    }
+    else
+    {
+      drawScreen();
+    }
+  }
 
   // Add a small default delay in the main loop
   delay(5);

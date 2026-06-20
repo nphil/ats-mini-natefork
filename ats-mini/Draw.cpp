@@ -5,8 +5,10 @@
 #include "Menu.h"
 #include "Ble.h"
 #include "Draw.h"
+#include <WiFi.h>
 #include "Button.h"
 #include <math.h>
+#include "EIBI.h"
 
 //
 // Draw preferences write indicator
@@ -75,19 +77,46 @@ void drawBleIndicator(int x, int y)
 void drawWiFiIndicator(int x, int y)
 {
   int8_t status = getWiFiStatus();
+  bool showIcon = (status == 2 && internetConnected) || (status == 1) || switchThemeEditor();
 
   // If need to draw WiFi icon...
-  if(status || switchThemeEditor())
+  if(showIcon)
   {
-    uint16_t color = (status>0) ? TH.rf_icon_conn : TH.rf_icon;
+    uint16_t outerColor = TH.rf_icon;
+    uint16_t middleColor = TH.rf_icon;
+    uint16_t innerColor = TH.rf_icon;
 
-    // For the editor, alternate between WiFi states every ~8 seconds
-    if(switchThemeEditor())
-      color = millis()&0x2000? TH.rf_icon_conn : TH.rf_icon;
+    if (switchThemeEditor())
+    {
+      uint16_t color = millis() & 0x2000 ? TH.rf_icon_conn : TH.rf_icon;
+      outerColor = middleColor = innerColor = color;
+    }
+    else if (status == 2) // Connected STA
+    {
+      // 3 arcs if RSSI >= -65, 2 arcs if >= -80, 1 arc otherwise
+      int numArcs = 1;
+      if (cachedWiFiRSSI >= -65 && cachedWiFiRSSI < 0) {
+        numArcs = 3;
+      } else if (cachedWiFiRSSI >= -80 && cachedWiFiRSSI < 0) {
+        numArcs = 2;
+      }
+      
+      innerColor = TH.rf_icon_conn;
+      middleColor = (numArcs >= 2) ? TH.rf_icon_conn : TH.bg;
+      outerColor = (numArcs >= 3) ? TH.rf_icon_conn : TH.bg;
+    }
+    else if (status > 0) // Other active connection (e.g. AP mode)
+    {
+      outerColor = middleColor = innerColor = TH.rf_icon_conn;
+    }
+    else
+    {
+      outerColor = middleColor = innerColor = TH.rf_icon;
+    }
 
-    spr.drawSmoothArc(x, 15+y, 14, 13, 150, 210, color, TH.bg);
-    spr.drawSmoothArc(x, 15+y, 9, 8, 150, 210, color, TH.bg);
-    spr.drawSmoothArc(x, 15+y, 4, 3, 150, 210, color, TH.bg);
+    spr.drawSmoothArc(x, 15+y, 4, 3, 150, 210, innerColor, TH.bg);
+    if (middleColor != TH.bg) spr.drawSmoothArc(x, 15+y, 9, 8, 150, 210, middleColor, TH.bg);
+    if (outerColor != TH.bg) spr.drawSmoothArc(x, 15+y, 14, 13, 150, 210, outerColor, TH.bg);
   }
 }
 
@@ -526,6 +555,421 @@ void drawScanGraphs(uint32_t freq, bool ghost)
 }
 
 //
+// Render Wifi Networks Management Screen
+//
+void drawWifiNetworksScreen()
+{
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.menu_hdr, TH.menu_bg);
+  spr.drawString("Select Wi-Fi Network", 10, 8, 4);
+  
+  spr.drawLine(10, 32, 310, 32, TH.menu_border);
+
+  if (wifiScanning && discoveredCount == 0)
+  {
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(TH.menu_item);
+    spr.drawString("Scanning for networks...", 160, 90, 4);
+    return;
+  }
+
+  int startIdx = 0;
+  if (wifiNetIdx >= 5)
+  {
+    startIdx = wifiNetIdx - 4;
+  }
+  
+  int displayCount = discoveredCount - startIdx;
+  if (displayCount > 5) displayCount = 5;
+
+  if (discoveredCount == 0)
+  {
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(TH.menu_item);
+    spr.drawString("No networks found", 160, 90, 4);
+  }
+  else
+  {
+    for (int i = 0; i < displayCount; i++)
+    {
+      int netIndex = startIdx + i;
+      int yPos = 38 + i * 24;
+
+      if (netIndex == wifiNetIdx)
+      {
+        spr.fillSmoothRoundRect(8, yPos - 2, 304, 22, 4, TH.menu_hl_bg);
+        spr.setTextColor(TH.menu_hl_text);
+      }
+      else
+      {
+        spr.setTextColor(TH.menu_item);
+      }
+
+      spr.setTextDatum(ML_DATUM);
+      String ssidName = String(discoveredNets[netIndex].ssid);
+      if (ssidName.length() > 22) ssidName = ssidName.substring(0, 20) + "..";
+      spr.drawString(ssidName, 15, yPos + 8, 2);
+
+      bool isConnected = (WiFi.status() == WL_CONNECTED) && (WiFi.SSID() == discoveredNets[netIndex].ssid);
+      if (isConnected)
+      {
+        spr.setTextColor(netIndex == wifiNetIdx ? TH.menu_hl_text : TH.menu_param);
+        spr.drawString("[Connected]", 170, yPos + 8, 2);
+        spr.setTextColor(netIndex == wifiNetIdx ? TH.menu_hl_text : TH.menu_item);
+      }
+
+      if (discoveredNets[netIndex].isSecure)
+      {
+        spr.drawCircle(265, yPos + 6, 3, netIndex == wifiNetIdx ? TH.menu_hl_text : TH.menu_item);
+        spr.fillRect(262, yPos + 8, 7, 6, netIndex == wifiNetIdx ? TH.menu_hl_text : TH.menu_item);
+      }
+
+      int rssi = discoveredNets[netIndex].rssi;
+      int bars = 1;
+      if (rssi >= -60) bars = 4;
+      else if (rssi >= -70) bars = 3;
+      else if (rssi >= -80) bars = 2;
+
+      uint16_t barColor = netIndex == wifiNetIdx ? TH.menu_hl_text : TH.menu_item;
+      for (int b = 0; b < 4; b++)
+      {
+        int barH = 4 + b * 3;
+        uint16_t color = (b < bars) ? barColor : TH.menu_bg;
+        if (color == TH.menu_bg && netIndex == wifiNetIdx) color = TH.menu_hl_bg;
+        if (b < bars)
+        {
+          spr.fillRect(280 + b * 5, yPos + 14 - barH, 3, barH, color);
+        }
+        else
+        {
+          spr.drawRect(280 + b * 5, yPos + 14 - barH, 3, barH, netIndex == wifiNetIdx ? TH.menu_hl_text : TH.menu_border);
+        }
+      }
+    }
+  }
+
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("[Press & Hold Button to Exit]", 160, 160, 2);
+}
+
+//
+// Render Virtual Keyboard Entry Screen
+//
+void drawWifiKeyboardScreen()
+{
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.menu_hdr, TH.menu_bg);
+  spr.drawString("Enter Wi-Fi Password", 10, 6, 4);
+
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("SSID: " + selectedSSID, 10, 32, 2);
+  
+  spr.drawRect(10, 48, 300, 22, TH.box_border);
+  spr.fillRect(11, 49, 298, 20, TH.box_bg);
+  
+  spr.setTextDatum(ML_DATUM);
+  spr.setTextColor(TH.box_text);
+  String displayPass = wifiPassword + "_";
+  if (displayPass.length() > 30) displayPass = ".." + displayPass.substring(displayPass.length() - 28);
+  spr.drawString(displayPass, 15, 59, 2);
+
+  int kw = 24;
+  int kh = 16;
+  int startX = 4;
+  int startY = 72;
+
+  const char keyboardChars[] = 
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789-_.";
+
+  for (int r = 0; r < 5; r++)
+  {
+    for (int c = 0; c < 13; c++)
+    {
+      int idx = r * 13 + c;
+      int x = startX + c * kw;
+      int y = startY + r * kh;
+
+      bool isSelected = (idx == keyboardIndex);
+
+      if (isSelected)
+      {
+        spr.fillRect(x + 1, y + 1, kw - 2, kh - 2, TH.menu_hl_bg);
+        spr.setTextColor(TH.menu_hl_text);
+      }
+      else
+      {
+        spr.drawRect(x, y, kw, kh, TH.menu_border);
+        spr.setTextColor(TH.menu_item);
+      }
+
+      spr.setTextDatum(MC_DATUM);
+      char label[2] = { keyboardChars[idx], '\0' };
+      spr.drawString(label, x + kw / 2, y + kh / 2 + 1, 2);
+    }
+  }
+
+  int rowY = startY + 5 * kh;
+
+  int activeCol = keyboardIndex % 13;
+  bool isRow5Selected = (keyboardIndex >= 65);
+
+  auto drawActionButton = [&](int colStart, int colSpan, const char* label, int actionId) {
+    int x = startX + colStart * kw;
+    int w = colSpan * kw;
+    bool isHighlighted = isRow5Selected && (activeCol >= colStart && activeCol < colStart + colSpan);
+
+    if (isHighlighted)
+    {
+      spr.fillRect(x + 1, rowY + 1, w - 2, kh - 2, TH.menu_hl_bg);
+      spr.setTextColor(TH.menu_hl_text);
+    }
+    else
+    {
+      spr.drawRect(x, rowY, w, kh, TH.menu_border);
+      spr.setTextColor(TH.menu_item);
+    }
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(label, x + w / 2, rowY + kh / 2 + 1, 2);
+  };
+
+  drawActionButton(0, 3, "Space", 0);
+  drawActionButton(3, 3, "Del", 1);
+  drawActionButton(6, 3, "Cancel", 2);
+  drawActionButton(9, 4, "Connect", 3);
+}
+
+void drawWifiConnectingScreen()
+{
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.menu_hdr, TH.menu_bg);
+  spr.drawString("Wi-Fi Connection", 10, 8, 4);
+  
+  spr.drawLine(10, 32, 310, 32, TH.menu_border);
+
+  spr.setTextDatum(MC_DATUM);
+  
+  if (wifiConnectStatus == 1) // Connecting
+  {
+    spr.setTextColor(TH.menu_item);
+    spr.drawString("Connecting to:", 160, 60, 4);
+    spr.setTextColor(TH.menu_param);
+    spr.drawString(connectingSSID, 160, 95, 4);
+    
+    // Draw simple animated indicator or progress dot
+    static int dotCount = 0;
+    static uint32_t lastDotUpdate = 0;
+    if (millis() - lastDotUpdate > 400)
+    {
+      dotCount = (dotCount + 1) % 4;
+      lastDotUpdate = millis();
+    }
+    String dots = "";
+    for (int d = 0; d < dotCount; d++) dots += ".";
+    spr.setTextColor(TH.menu_item);
+    spr.drawString(dots, 160, 130, 4);
+  }
+  else if (wifiConnectStatus == 2) // Success
+  {
+    spr.setTextColor(TH.menu_hl_text);
+    spr.drawString("Successful!", 160, 75, 4);
+    spr.setTextColor(TH.menu_item);
+    spr.drawString("Connected to network.", 160, 115, 2);
+  }
+  else if (wifiConnectStatus == 3) // Failed
+  {
+    spr.setTextColor(TH.menu_item);
+    spr.drawString("Connection Failed", 160, 75, 4);
+    spr.setTextColor(TH.menu_param);
+    spr.drawString("Check password / settings", 160, 105, 2);
+    spr.setTextColor(TH.menu_hl_text);
+    spr.drawString("[Click Encoder to Return]", 160, 140, 2);
+  }
+}
+
+void drawWifiStatusScreen()
+{
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.menu_hdr, TH.menu_bg);
+  spr.drawString("Wi-Fi Status", 10, 8, 4);
+  
+  spr.drawLine(10, 32, 310, 32, TH.menu_border);
+
+  spr.setTextColor(TH.menu_item);
+  spr.setTextDatum(TL_DATUM);
+
+  wl_status_t status = WiFi.status();
+  String connState = "Disconnected";
+  uint16_t stateColor = TH.menu_param;
+  
+  if (status == WL_CONNECTED)
+  {
+    connState = internetConnected ? "Connected (Internet OK)" : "Connected (No Internet)";
+    stateColor = internetConnected ? TH.menu_hl_text : 0xFFE0; // Yellow
+  }
+  else if (status == WL_IDLE_STATUS)
+  {
+    connState = "Idle / Transitioning";
+  }
+  else if (status == WL_NO_SSID_AVAIL)
+  {
+    connState = "SSID Not Found";
+    stateColor = TH.batt_low;
+  }
+  else if (status == WL_CONNECT_FAILED)
+  {
+    connState = "Connection Failed";
+    stateColor = TH.batt_low;
+  }
+  else if (status == WL_CONNECTION_LOST)
+  {
+    connState = "Connection Lost";
+    stateColor = TH.batt_low;
+  }
+
+  spr.drawString("State:", 15, 45, 2);
+  spr.setTextColor(stateColor);
+  spr.drawString(connState, 110, 45, 2);
+  
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("Network:", 15, 70, 2);
+  spr.setTextColor(TH.menu_param);
+  String ssid = (status == WL_CONNECTED) ? WiFi.SSID() : "None";
+  spr.drawString(ssid, 110, 70, 2);
+
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("IP Address:", 15, 95, 2);
+  spr.setTextColor(TH.menu_param);
+  String ipAddr = (status == WL_CONNECTED) ? WiFi.localIP().toString() : "0.0.0.0";
+  spr.drawString(ipAddr, 110, 95, 2);
+
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("Signal:", 15, 120, 2);
+  spr.setTextColor(TH.menu_param);
+  String signalStr = "0%";
+  if (status == WL_CONNECTED)
+  {
+    int pct = (cachedWiFiRSSI <= -100) ? 0 : (cachedWiFiRSSI >= -50) ? 100 : (cachedWiFiRSSI + 100) * 2;
+    signalStr = String(pct) + "% (" + String(cachedWiFiRSSI) + " dBm)";
+  }
+  spr.drawString(signalStr, 110, 120, 2);
+
+  spr.setTextColor(TH.menu_item);
+  spr.setTextDatum(MC_DATUM);
+  spr.drawString("[Click Encoder to Return]", 160, 160, 2);
+}
+
+//
+// Render Scrollable EiBi Database Browser Screen
+//
+void drawEibiBrowseScreen()
+{
+  // Title
+  spr.setTextDatum(TL_DATUM);
+  spr.setTextColor(TH.menu_hdr, TH.menu_bg);
+  spr.drawString("EiBi Database", 10, 8, 4);
+
+  spr.drawLine(10, 32, 310, 32, TH.menu_border);
+
+  // Column headers
+  spr.setTextColor(TH.menu_border);
+  spr.setTextDatum(TL_DATUM);
+  spr.drawString("kHz", 10, 35, 1);
+  spr.drawString("Station", 68, 35, 1);
+  spr.setTextDatum(TR_DATUM);
+  spr.drawString("Time", 310, 35, 1);
+
+  int totalEntries = eibiGetCount();
+  if (totalEntries == 0)
+  {
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(TH.menu_item);
+    spr.drawString("No EiBi data", 160, 90, 4);
+    spr.drawString("Download from Settings", 160, 115, 2);
+    spr.drawString("[Long Press to Exit]", 160, 158, 2);
+    return;
+  }
+
+  // Clamp browse index
+  if (eibiBrowseIdx >= totalEntries) eibiBrowseIdx = totalEntries - 1;
+  if (eibiBrowseIdx < 0) eibiBrowseIdx = 0;
+
+  // Calculate visible window (5 entries)
+  int maxVisible = 5;
+  int startIdx = 0;
+  if (eibiBrowseIdx >= maxVisible)
+  {
+    startIdx = eibiBrowseIdx - maxVisible + 1;
+  }
+
+  // Read entries from file
+  StationSchedule entries[5];
+  int readCount = eibiReadEntries(startIdx, entries, maxVisible);
+
+  for (int i = 0; i < readCount; i++)
+  {
+    int entryIdx = startIdx + i;
+    int yPos = 46 + i * 22;
+
+    if (entryIdx == eibiBrowseIdx)
+    {
+      spr.fillSmoothRoundRect(5, yPos - 2, 310, 20, 4, TH.menu_hl_bg);
+      spr.setTextColor(TH.menu_hl_text);
+    }
+    else
+    {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    // Frequency (kHz)
+    char freqStr[10];
+    sprintf(freqStr, "%d", entries[i].freq);
+    spr.setTextDatum(TL_DATUM);
+    spr.drawString(freqStr, 10, yPos + 2, 2);
+
+    // Station name (truncate to fit)
+    char nameStr[24];
+    strncpy(nameStr, entries[i].name, 20);
+    nameStr[20] = '\0';
+    if (strlen(entries[i].name) > 20)
+    {
+      nameStr[18] = '.';
+      nameStr[19] = '.';
+    }
+    spr.drawString(nameStr, 68, yPos + 2, 2);
+
+    // Time window
+    char timeStr[16];
+    if (entries[i].start_h < 0)
+    {
+      strcpy(timeStr, "24hr");
+    }
+    else
+    {
+      sprintf(timeStr, "%02d:%02d-%02d:%02d",
+        entries[i].start_h, entries[i].start_m,
+        entries[i].end_h, entries[i].end_m);
+    }
+    spr.setTextDatum(TR_DATUM);
+    spr.drawString(timeStr, 310, yPos + 2, 2);
+  }
+
+  // Scroll position indicator
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(TH.menu_border);
+  char posStr[16];
+  sprintf(posStr, "%d / %d", eibiBrowseIdx + 1, totalEntries);
+  spr.drawString(posStr, 270, 158, 1);
+
+  // Footer
+  spr.setTextColor(TH.menu_item);
+  spr.drawString("[Long Press to Exit]", 130, 158, 2);
+}
+
+//
 // Draw screen according to given command
 //
 void drawScreen(const char *statusLine1, const char *statusLine2)
@@ -539,6 +983,46 @@ void drawScreen(const char *statusLine1, const char *statusLine2)
   if(currentCmd==CMD_ABOUT)
   {
     drawAbout();
+    return;
+  }
+
+  if(currentCmd==CMD_WIFI_NETWORKS)
+  {
+    spr.fillSprite(TH.menu_bg);
+    drawWifiNetworksScreen();
+    spr.pushSprite(0, 0);
+    return;
+  }
+
+  if(currentCmd==CMD_WIFI_KEYBOARD)
+  {
+    spr.fillSprite(TH.menu_bg);
+    drawWifiKeyboardScreen();
+    spr.pushSprite(0, 0);
+    return;
+  }
+
+  if(currentCmd==CMD_WIFI_CONNECTING || currentCmd==CMD_WIFI_CONNECT_FAILED)
+  {
+    spr.fillSprite(TH.menu_bg);
+    drawWifiConnectingScreen();
+    spr.pushSprite(0, 0);
+    return;
+  }
+
+  if(currentCmd==CMD_WIFI_STATUS)
+  {
+    spr.fillSprite(TH.menu_bg);
+    drawWifiStatusScreen();
+    spr.pushSprite(0, 0);
+    return;
+  }
+
+  if(currentCmd==CMD_EIBI_BROWSE)
+  {
+    spr.fillSprite(TH.menu_bg);
+    drawEibiBrowseScreen();
+    spr.pushSprite(0, 0);
     return;
   }
 

@@ -24,5 +24,8 @@ const StationSchedule *eibiLookup(uint16_t freq, uint8_t hour, uint8_t minute, s
 const StationSchedule *eibiPrev(uint16_t freq, uint8_t hour, uint8_t minute, size_t *offset);
 const StationSchedule *eibiNext(uint16_t freq, uint8_t hour, uint8_t minute, size_t *offset);
 const StationSchedule *eibiAtSameFreq(uint8_t hour, uint8_t minute, size_t *offset, bool same);
+int eibiGetCount();
+bool eibiReadEntry(int index, StationSchedule *entry);
+int eibiReadEntries(int startIndex, StationSchedule *entries, int maxCount);
 
 #endif // EIBI_H

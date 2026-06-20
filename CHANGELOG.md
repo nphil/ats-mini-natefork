@@ -6,8 +6,22 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 ## 2.53 (2026-06-20)
 
+### Added
+
+- **EiBi Submenu and Scrollable Browser**: Added a dedicated sub-menu for EiBi settings featuring "Download EiBi" and "Browse" options. The fullscreen browse screen allows scrolling through downloaded schedules (displaying station name, frequency, and location). Pressing the encoder button on an entry automatically tunes the VFO to its frequency, and holding the button for 2 seconds exits back to the menu.
+- **Wi-Fi Status Screen**: Added a "Status" option under the Wi-Fi settings menu. It displays the currently connected SSID, connection strength percentage (derived from RSSI), and local IP address, along with failure details if there are connectivity issues.
+- **Persistent Wi-Fi & Auto-Connect**: The radio now remembers the Wi-Fi power state (on/off) and the last connected network credentials across flashes and restarts. If Wi-Fi was left on, the radio automatically attempts to connect to the saved network on boot, showing a step-by-step toast sequence (Connecting -> Authenticating -> Success -> IP / RSSI %).
+
+### Changed
+
+- **Internet Connectivity Checks for Wi-Fi Icon**: The Wi-Fi signal strength icon on the main screen is now only displayed when the radio has an active Wi-Fi connection and a ping check to the internet succeeds.
+- **Themed EiBi Browser UI**: The EiBi browser layout is fully integrated with active user theme colors (`TH.*`).
+
 ### Fixed
 
+- **Core 3.3.10 Boot Crash Workaround**: Added an early call to `gpio_install_isr_service(0);` at startup to prevent an IPC cross-core stack overflow crash in ESP32 Arduino Core 3.3.10 when initializing GPIO interrupts.
+- **High Contrast Battery Text**: Eliminated the black cutout box around the battery text inside the battery icon. The percentage and voltage text now dynamically contrast against the battery outline and fill colors.
+- **Accurate Wi-Fi Signal Arcs**: Fixed the main screen's Wi-Fi icon arcs to scale accurately based on active RSSI signal strength, ignoring positive/spurious readings and hiding inactive arcs.
 - **Boot loop / `ets_loader.c 78` hang on octal-PSRAM boards fixed by switching flash to DIO mode.** Builds were configured with `FlashMode=qio` while also using `PSRAM=opi` (octal PSRAM). On ESP32-S3R8 modules these are physically incompatible — the OPI PSRAM occupies the GPIOs that QIO flash needs for its D2/D3/WP/HOLD lines, so the flash can only run with two data lines (DIO). The QIO header caused the ROM bootloader to read corrupt data while loading the second-stage bootloader and hang at `ets_loader.c 78`, then watchdog-reset in a loop — before any app, recovery, or partition-table code could run. All build profiles and the merged `-flash.bin` / `-full.bin` images now use `FlashMode=dio` at 40 MHz. Because the flash mode lives in the bootloader header at `0x0`, every flashing path (desktop esptool, the Android USB flasher, and the web flasher) inherits the correct setting automatically.
 
 ## 2.44 (2026-05-28)

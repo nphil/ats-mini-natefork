@@ -42,7 +42,16 @@
 #define CMD_USBMODE    0x2D00 // |
 #define CMD_BLEMODE    0x2E00 // |
 #define CMD_WIFIMODE   0x2F00 // |
+#define CMD_WIFI_STATE    0x2F10 // |
+#define CMD_WIFI_NETWORKS 0x2F20 // |
+#define CMD_WIFI_KEYBOARD 0x2F30 // |
+#define CMD_WIFI_CONNECTING   0x2F40
+#define CMD_WIFI_CONNECT_FAILED 0x2F50
+#define CMD_WIFI_STATUS       0x2F60
 #define CMD_ABOUT         0x3000 //-+
+#define CMD_BATTERY       0x3100
+#define CMD_EIBI_MENU     0x3500
+#define CMD_EIBI_BROWSE   0x3600
 
 #define CMD_CPU           0x3200 // CPU usage display toggle
 #define CMD_CPU_USAGE     0x3300 // CPU usage display toggle
@@ -129,5 +138,39 @@ void doStep(int16_t enc);
 void doMode(int16_t enc);
 void doBand(int16_t enc);
 void doSquelch(int16_t enc);
+
+struct DiscoveredNet {
+  char ssid[33];
+  int32_t rssi;
+  bool isSecure;
+};
+
+extern int8_t wifiSubmenuIdx;
+extern const char *wifiSubDesc[];
+extern uint8_t wifiEnabled;
+extern int8_t wifiNetIdx;
+extern int discoveredCount;
+extern DiscoveredNet discoveredNets[30];
+extern bool wifiScanning;
+extern String wifiPassword;
+extern int8_t keyboardIndex;
+extern String selectedSSID;
+
+extern bool wifiConnecting;
+extern uint8_t wifiConnectStatus;
+extern String connectingSSID;
+extern bool wifiAutoConnectActive;
+extern bool wifiToastActive;
+extern String wifiToastLine1;
+extern String wifiToastLine2;
+void wifiStartConnect(const char* ssid, const char* password);
+void wifiStartAutoConnect();
+bool wifiConnectTick();
+
+void wifiStartScan();
+void wifiScanTick();
+void saveWifiCredentials(const char* ssid, const char* password);
+extern int8_t eibiSubmenuIdx;
+extern int eibiBrowseIdx;
 
 #endif // MENU_H

@@ -54,6 +54,12 @@ void drawScale(uint32_t freq);
 
 void drawLayoutDefault(const char *statusLine1, const char *statusLine2);
 
+void drawWifiNetworksScreen();
+void drawWifiKeyboardScreen();
+void drawWifiConnectingScreen();
+void drawWifiStatusScreen();
+void drawEibiBrowseScreen();
+
 void drawAbout();
 void drawAboutHelp(uint8_t arrow);
 void drawSplash();

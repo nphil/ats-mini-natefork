@@ -18,6 +18,38 @@ static uint8_t batteryState = 255;
 // Current battery voltage
 static float batteryVolts = 4.0;
 
+uint8_t batteryDisplayMode = 0; // 0 = Voltage, 1 = Percentage (%), 2 = Off
+
+int getBatteryPercentage()
+{
+  float v = batteryVolts;
+  if (v >= 4.20) return 100;
+  if (v <= 3.20) return 0;
+  
+  float pct = 0;
+  if (v >= BATT_SOC_LEVEL3)
+  {
+    pct = 75.0 + (v - BATT_SOC_LEVEL3) * (25.0 / (4.20 - BATT_SOC_LEVEL3));
+  }
+  else if (v >= BATT_SOC_LEVEL2)
+  {
+    pct = 50.0 + (v - BATT_SOC_LEVEL2) * (25.0 / (BATT_SOC_LEVEL3 - BATT_SOC_LEVEL2));
+  }
+  else if (v >= BATT_SOC_LEVEL1)
+  {
+    pct = 25.0 + (v - BATT_SOC_LEVEL1) * (25.0 / (BATT_SOC_LEVEL2 - BATT_SOC_LEVEL1));
+  }
+  else
+  {
+    pct = (v - 3.20) * (25.0 / (BATT_SOC_LEVEL1 - 3.20));
+  }
+  
+  int ipct = (int)pct;
+  if (ipct < 0) ipct = 0;
+  if (ipct > 100) ipct = 100;
+  return ipct;
+}
+
 //
 // Measure and return battery voltage
 //
@@ -78,8 +110,6 @@ bool drawBattery(int x, int y)
   spr.drawLine(x + 29, y + 5, x + 29, y + 10, TH.batt_border);
   spr.drawLine(x + 30, y + 6, x + 30, y + 9, TH.batt_border);
 
-  spr.setTextDatum(TR_DATUM);
-  spr.setTextColor(TH.batt_voltage);
 
   if(switchThemeEditor())
   {
@@ -108,37 +138,45 @@ bool drawBattery(int x, int y)
   }
   else
   {
-    char voltage[8];
+    int pct = getBatteryPercentage();
+    int level = (pct * 24) / 100;
+    if (level < 2 && pct > 0) level = 2; // draw at least 2 pixels if not completely dead
+    
     uint16_t color;
-    int level;
-
-    // Text representation of the voltage
-    sprintf(voltage, "%.02fV", batteryVolts);
-
-    // Battery bar color and width
-    switch(batteryState)
-    {
-      case 0:
-        color = TH.batt_low;
-        level = 6;
-        break;
-      case 1:
-        color = TH.batt_full;
-        level = 12;
-        break;
-      case 2:
-        color = TH.batt_full;
-        level = 18;
-        break;
-      case 3:
-      default:
-        color = TH.batt_full;
-        level = 24;
-        break;
-    }
+    if (pct > 50)
+      color = TH.batt_full;
+    else if (pct > 20)
+      color = 0xFFE0; // Yellow
+    else
+      color = TH.batt_low; // Red
 
     spr.fillRoundRect(x + 2, y + 3, level, 10, 2, color);
-    spr.drawString(voltage, x - 3, y, 2);
-    return true;
+
+    // Draw text inside if not Off (2)
+    if (batteryDisplayMode != 2)
+    {
+      char buf[8];
+      uint16_t textColor = TH.batt_voltage;
+      if (level >= 12)
+      {
+        textColor = 0x0000; // Black for high contrast on filled color
+      }
+      
+      spr.setTextColor(textColor);
+      spr.setTextDatum(MC_DATUM);
+      
+      if (batteryDisplayMode == 0) // Voltage
+      {
+        sprintf(buf, "%.1f", batteryVolts);
+      }
+      else // Percentage (%)
+      {
+        sprintf(buf, "%d", pct);
+      }
+      
+      spr.drawString(buf, x + 14, y + 8, 1);
+    }
+    
+    return false; // Always return false so the wifi indicator is drawn in the compact position
   }
 }

@@ -7,6 +7,7 @@
 #include "Ble.h"
 #include "Menu.h"
 #include "Storage.h"
+#include <WiFi.h>
 
 //
 // Bands Menu
@@ -124,8 +125,9 @@ static const char *menu[] =
 #define MENU_USBMODE      10
 #define MENU_BLEMODE      11
 #define MENU_WIFIMODE     12
-#define MENU_ABOUT        13
-#define MENU_CPU          14
+#define MENU_BATTERY      13
+#define MENU_ABOUT        14
+#define MENU_CPU          15
 
 
 int8_t settingsIdx = MENU_BRIGHTNESS;
@@ -141,10 +143,11 @@ static const char *settings[] =
   "Scroll Dir.",
   "Sleep",
   "Sleep Mode",
-  "Load EiBi",
+  "EiBi",
   "USB Port",
   "Bluetooth",
   "Wi-Fi",
+  "Battery",
   "About",
   "CPU",
 };
@@ -240,6 +243,252 @@ int getTotalBleModes() { return(ITEM_COUNT(bleModeDesc)); }
 uint8_t wifiModeIdx = NET_OFF;
 static const char *wifiModeDesc[] =
 { "Off", "AP Only", "AP+Connect", "Connect", "Sync Only" };
+
+//
+// Wi-Fi Management State Variables & Helpers
+//
+int8_t wifiSubmenuIdx = 0;
+const char *wifiSubDesc[] = { "Wi-Fi State", "Networks", "Status" };
+uint8_t wifiEnabled = 0;
+
+int8_t eibiSubmenuIdx = 0;
+int eibiBrowseIdx = 0;
+static const char *eibiSubDesc[] = { "Download", "Browse" };
+
+int8_t wifiNetIdx = 0;
+int discoveredCount = 0;
+DiscoveredNet discoveredNets[30];
+
+bool wifiScanning = false;
+uint32_t wifiScanStartTime = 0;
+
+String wifiPassword = "";
+int8_t keyboardIndex = 0;
+String selectedSSID = "";
+
+void wifiStartScan()
+{
+  WiFi.setAutoReconnect(false);
+  if (WiFi.getMode() == WIFI_MODE_NULL)
+  {
+    WiFi.mode(WIFI_AP_STA);
+  }
+  WiFi.scanNetworks(true, false, false, 300);
+  wifiScanning = true;
+  wifiScanStartTime = millis();
+  discoveredCount = 0;
+  wifiNetIdx = 0;
+}
+
+bool wifiConnecting = false;
+uint8_t wifiConnectStatus = 0; // 0 = Idle, 1 = Connecting, 2 = Success, 3 = Failed
+String connectingSSID = "";
+uint32_t wifiConnectStartTime = 0;
+bool wifiAutoConnectActive = false;
+bool wifiToastActive = false;
+String wifiToastLine1 = "";
+String wifiToastLine2 = "";
+
+void wifiStartConnect(const char* ssid, const char* password)
+{
+  connectingSSID = ssid;
+  wifiConnecting = true;
+  wifiConnectStatus = 1; // Connecting
+  wifiConnectStartTime = millis();
+
+  // Stop existing connection
+  netStop();
+
+  // Set mode to AP_STA or STA depending on setting
+  WiFi.mode(wifiModeIdx == NET_AP_CONNECT ? WIFI_AP_STA : WIFI_STA);
+  WiFi.setAutoReconnect(true);
+
+  // Start connection asynchronously
+  WiFi.begin(ssid, password);
+
+  currentCmd = CMD_WIFI_CONNECTING;
+}
+
+void wifiStartAutoConnect()
+{
+  Preferences credentials;
+  credentials.begin("network", true, STORAGE_PARTITION);
+  String ssid = credentials.getString("wifissid1", "");
+  String password = credentials.getString("wifipass1", "");
+  credentials.end();
+
+  if (ssid == "")
+  {
+    return;
+  }
+
+  connectingSSID = ssid;
+  wifiConnecting = true;
+  wifiConnectStatus = 1; // Connecting
+  wifiConnectStartTime = millis();
+  wifiAutoConnectActive = true;
+  wifiToastActive = true;
+  wifiToastLine1 = "Connecting...";
+  wifiToastLine2 = "To: " + ssid;
+
+  netStop();
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(ssid.c_str(), password.c_str());
+}
+
+bool wifiConnectTick()
+{
+  bool changed = false;
+  if (wifiConnecting)
+  {
+    wl_status_t status = WiFi.status();
+
+    if (wifiAutoConnectActive)
+    {
+      if (millis() - wifiConnectStartTime > 2000 && wifiToastLine1 == "Connecting...")
+      {
+        wifiToastLine1 = "Authenticating...";
+        changed = true;
+      }
+    }
+
+    if (status == WL_CONNECTED)
+    {
+      wifiConnecting = false;
+      wifiConnectStatus = 2; // Success
+      wifiConnectStartTime = millis(); // Reuse for display timer
+      wifiEnabled = 1;
+      netInitServices();
+      updateWiFiRSSI(); // update cache immediately
+      changed = true;
+
+      if (wifiAutoConnectActive)
+      {
+        int pct = (cachedWiFiRSSI <= -100) ? 0 : (cachedWiFiRSSI >= -50) ? 100 : (cachedWiFiRSSI + 100) * 2;
+        wifiToastLine1 = "Success!";
+        wifiToastLine2 = "IP: " + WiFi.localIP().toString() + " (" + String(pct) + "%)";
+      }
+    }
+    else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL || (millis() - wifiConnectStartTime > 15000))
+    {
+      wifiConnecting = false;
+      wifiConnectStatus = 3; // Failed
+      wifiConnectStartTime = millis(); // Reuse for display timer
+      changed = true;
+
+      if (wifiAutoConnectActive)
+      {
+        wifiToastLine1 = "Connection Failed";
+        wifiToastLine2 = "Could not connect";
+      }
+      else
+      {
+        currentCmd = CMD_WIFI_CONNECT_FAILED;
+      }
+    }
+  }
+
+  if (!wifiConnecting && (wifiConnectStatus == 2 || wifiConnectStatus == 3))
+  {
+    if (millis() - wifiConnectStartTime > 2000)
+    {
+      wifiConnectStatus = 0;
+      wifiAutoConnectActive = false;
+      wifiToastActive = false;
+      if (currentCmd == CMD_WIFI_CONNECTING)
+      {
+        currentCmd = CMD_NONE;
+      }
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+void wifiScanTick()
+{
+  if (wifiScanning)
+  {
+    int16_t scanStatus = WiFi.scanComplete();
+    if (scanStatus >= 0)
+    {
+      int count = scanStatus > 30 ? 30 : scanStatus;
+      discoveredCount = 0;
+      for (int i = 0; i < count; i++)
+      {
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0) continue; // Skip hidden/empty SSIDs
+        
+        // Check if SSID already exists in discoveredNets
+        int foundIdx = -1;
+        for (int j = 0; j < discoveredCount; j++)
+        {
+          if (strcmp(discoveredNets[j].ssid, ssid.c_str()) == 0)
+          {
+            foundIdx = j;
+            break;
+          }
+        }
+        
+        int32_t rssi = WiFi.RSSI(i);
+        bool isSecure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+        
+        if (foundIdx != -1)
+        {
+          // Duplicate SSID: keep the one with stronger signal
+          if (rssi > discoveredNets[foundIdx].rssi)
+          {
+            discoveredNets[foundIdx].rssi = rssi;
+            discoveredNets[foundIdx].isSecure = isSecure;
+          }
+        }
+        else
+        {
+          // New unique SSID
+          strncpy(discoveredNets[discoveredCount].ssid, ssid.c_str(), 32);
+          discoveredNets[discoveredCount].ssid[32] = '\0';
+          discoveredNets[discoveredCount].rssi = rssi;
+          discoveredNets[discoveredCount].isSecure = isSecure;
+          discoveredCount++;
+          if (discoveredCount >= 30) break;
+        }
+      }
+      WiFi.scanDelete();
+      wifiScanning = false;
+    }
+    else if (scanStatus == WIFI_SCAN_FAILED || (scanStatus == WIFI_SCAN_RUNNING && millis() - wifiScanStartTime > 10000))
+    {
+      // Timeout or failed
+      WiFi.scanDelete();
+      wifiScanning = false;
+    }
+  }
+}
+
+void saveWifiCredentials(const char* ssid, const char* password)
+{
+  Preferences credentials;
+  credentials.begin("network", false, STORAGE_PARTITION);
+
+  String ssid1 = credentials.getString("wifissid1", "");
+  String pass1 = credentials.getString("wifipass1", "");
+  String ssid2 = credentials.getString("wifissid2", "");
+  String pass2 = credentials.getString("wifipass2", "");
+
+  if (ssid1 != ssid)
+  {
+    credentials.putString("wifissid3", ssid2);
+    credentials.putString("wifipass3", pass2);
+    credentials.putString("wifissid2", ssid1);
+    credentials.putString("wifipass2", pass1);
+  }
+
+  credentials.putString("wifissid1", ssid);
+  credentials.putString("wifipass1", password);
+
+  credentials.end();
+}
 
 //
 // Step Menu
@@ -612,16 +861,7 @@ static void doBleMode(int16_t enc)
   bleModeIdx = newBleModeIdx;
 }
 
-static void doWiFiMode(int16_t enc)
-{
-  wifiModeIdx = wrap_range(wifiModeIdx, enc, 0, LAST_ITEM(wifiModeDesc));
-}
 
-static void clickWiFiMode(uint8_t mode, bool shortPress)
-{
-  currentCmd = CMD_NONE;
-  netInit(mode);
-}
 
 static void doRDSMode(int16_t enc)
 {
@@ -888,6 +1128,7 @@ static void clickSettings(int cmd, bool shortPress)
     case MENU_USBMODE:    currentCmd = CMD_USBMODE;    break;
     case MENU_BLEMODE:     currentCmd = CMD_BLEMODE;     break;
     case MENU_WIFIMODE:    currentCmd = CMD_WIFIMODE;    break;
+    case MENU_BATTERY:     currentCmd = CMD_BATTERY;     break;
     case MENU_FM_REGION:
       // Only in FM mode
       if(currentMode==FM) currentCmd = CMD_FM_REGION;
@@ -896,7 +1137,7 @@ static void clickSettings(int cmd, bool shortPress)
     case MENU_CPU:        currentCmd = CMD_CPU;       break;
 
     case MENU_LOADEIBI:
-      eibiLoadSchedule();
+      currentCmd = CMD_EIBI_MENU;
       break;
   }
 }
@@ -929,7 +1170,24 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
     case CMD_SLEEPMODE:  doSleepMode(scrollDirection * enc);break;
     case CMD_USBMODE:    doUSBMode(scrollDirection * enc);break;
     case CMD_BLEMODE:     doBleMode(scrollDirection * enc);break;
-    case CMD_WIFIMODE:    doWiFiMode(scrollDirection * enc);break;
+    case CMD_BATTERY:
+      batteryDisplayMode = wrap_range(batteryDisplayMode, scrollDirection * enc, 0, 2);
+      break;
+    case CMD_WIFIMODE:
+      wifiSubmenuIdx = wrap_range(wifiSubmenuIdx, scrollDirection * enc, 0, LAST_ITEM(wifiSubDesc));
+      break;
+    case CMD_WIFI_STATE:
+      wifiEnabled = wrap_range(wifiEnabled, scrollDirection * enc, 0, 1);
+      break;
+    case CMD_WIFI_NETWORKS:
+      if (discoveredCount > 0)
+      {
+        wifiNetIdx = wrap_range(wifiNetIdx, scrollDirection * enc, 0, discoveredCount - 1);
+      }
+      break;
+    case CMD_WIFI_KEYBOARD:
+      keyboardIndex = wrap_range(keyboardIndex, scrollDirection * enc, 0, 77);
+      break;
     case CMD_ZOOM:       doZoom(enc);break;
     case CMD_SCROLL:     doScrollDir(enc);break;
     case CMD_SQUELCH:    doSquelch(enca);break;
@@ -944,6 +1202,18 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
       break;
     }
     case CMD_SCAN:         return doScanChannel(scrollDirection * enc);
+    case CMD_EIBI_MENU:
+      eibiSubmenuIdx = wrap_range(eibiSubmenuIdx, scrollDirection * enc, 0, LAST_ITEM(eibiSubDesc));
+      break;
+    case CMD_EIBI_BROWSE:
+    {
+      int totalEntries = eibiGetCount();
+      if (totalEntries > 0)
+      {
+        eibiBrowseIdx = clamp_range(eibiBrowseIdx, scrollDirection * enc, 0, totalEntries - 1);
+      }
+      break;
+    }
 
     default:             return(false);
   }
@@ -959,7 +1229,113 @@ bool clickHandler(uint16_t cmd, bool shortPress)
     case CMD_MENU:          clickMenu(menuIdx, shortPress);break;
     case CMD_SETTINGS:      clickSettings(settingsIdx, shortPress);break;
     case CMD_MEMORY:        clickMemory(memoryIdx, shortPress);break;
-    case CMD_WIFIMODE:      clickWiFiMode(wifiModeIdx, shortPress);break;
+    case CMD_WIFIMODE:
+      if (wifiSubmenuIdx == 0)
+      {
+        currentCmd = CMD_WIFI_STATE;
+      }
+      else if (wifiSubmenuIdx == 1)
+      {
+        wifiStartScan();
+        currentCmd = CMD_WIFI_NETWORKS;
+      }
+      else
+      {
+        currentCmd = CMD_WIFI_STATUS;
+      }
+      break;
+    case CMD_WIFI_STATUS:
+      currentCmd = CMD_WIFIMODE;
+      break;
+    case CMD_WIFI_STATE:
+      if (wifiEnabled)
+      {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+          currentCmd = CMD_NONE;
+          drawScreen("WiFi already connected", "");
+          delay(2000);
+          return true;
+        }
+
+        if (wifiModeIdx == NET_OFF || wifiModeIdx == NET_AP_CONNECT || wifiModeIdx == NET_AP_ONLY)
+        {
+          wifiModeIdx = NET_CONNECT;
+        }
+        wifiStartAutoConnect();
+      }
+      else
+      {
+        wifiModeIdx = NET_OFF;
+        netStop();
+      }
+      prefsRequestSave(SAVE_SETTINGS);
+      currentCmd = CMD_NONE;
+      break;
+    case CMD_WIFI_NETWORKS:
+      if (discoveredCount > 0)
+      {
+        if (discoveredNets[wifiNetIdx].isSecure)
+        {
+          selectedSSID = String(discoveredNets[wifiNetIdx].ssid);
+          wifiPassword = "";
+          keyboardIndex = 0;
+          currentCmd = CMD_WIFI_KEYBOARD;
+        }
+        else
+        {
+          saveWifiCredentials(discoveredNets[wifiNetIdx].ssid, "");
+          if (wifiModeIdx == NET_OFF || wifiModeIdx == NET_AP_CONNECT || wifiModeIdx == NET_AP_ONLY)
+          {
+            wifiModeIdx = NET_CONNECT;
+          }
+          wifiStartConnect(discoveredNets[wifiNetIdx].ssid, "");
+        }
+      }
+      break;
+    case CMD_WIFI_KEYBOARD:
+      {
+        if (keyboardIndex < 65)
+        {
+          const char keyboardChars[] = 
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "abcdefghijklmnopqrstuvwxyz"
+            "0123456789-_.";
+          if (wifiPassword.length() < 63)
+          {
+            wifiPassword += keyboardChars[keyboardIndex];
+          }
+        }
+        else
+        {
+          int col = keyboardIndex % 13;
+          if (col >= 0 && col <= 2)
+          {
+            if (wifiPassword.length() < 63) wifiPassword += " ";
+          }
+          else if (col >= 3 && col <= 5)
+          {
+            if (wifiPassword.length() > 0)
+            {
+              wifiPassword.remove(wifiPassword.length() - 1);
+            }
+          }
+          else if (col >= 6 && col <= 8)
+          {
+            currentCmd = CMD_WIFI_NETWORKS;
+          }
+          else
+          {
+            saveWifiCredentials(selectedSSID.c_str(), wifiPassword.c_str());
+            if (wifiModeIdx == NET_OFF || wifiModeIdx == NET_AP_CONNECT || wifiModeIdx == NET_AP_ONLY)
+            {
+              wifiModeIdx = NET_CONNECT;
+            }
+            wifiStartConnect(selectedSSID.c_str(), wifiPassword.c_str());
+          }
+        }
+      }
+      break;
     case CMD_VOLUME:        clickVolume(shortPress);break;
     case CMD_SQUELCH:       clickSquelch(shortPress);break;
     case CMD_SEEK:          clickSeek(shortPress);break;
@@ -980,6 +1356,75 @@ bool clickHandler(uint16_t cmd, bool shortPress)
       prefsRequestSave(SAVE_SETTINGS);
       currentCmd = CMD_NONE;
       break;
+    case CMD_BATTERY:
+      prefsRequestSave(SAVE_SETTINGS);
+      currentCmd = CMD_NONE;
+      break;
+    case CMD_WIFI_CONNECT_FAILED:
+      currentCmd = CMD_WIFI_NETWORKS;
+      break;
+    case CMD_EIBI_MENU:
+      if (eibiSubmenuIdx == 0)
+      {
+        // Download
+        eibiLoadSchedule();
+        currentCmd = CMD_NONE;
+      }
+      else
+      {
+        // Browse
+        if (eibiAvailable())
+        {
+          eibiBrowseIdx = 0;
+          currentCmd = CMD_EIBI_BROWSE;
+        }
+        else
+        {
+          drawScreen("EiBi", "No data - download first");
+          delay(2000);
+          currentCmd = CMD_NONE;
+        }
+      }
+      break;
+    case CMD_EIBI_BROWSE:
+    {
+      // Read the selected entry
+      StationSchedule entry;
+      if (eibiReadEntry(eibiBrowseIdx, &entry))
+      {
+        // Find best AM band for this frequency
+        int count = ITEM_COUNT(bands);
+        int targetBand = 1; // Default to ALL band
+
+        // First pass: look for an AM band that covers this frequency
+        for (int i = 2; i < count; i++)
+        {
+          if (bands[i].bandMode == AM &&
+              entry.freq >= bands[i].minimumFreq &&
+              entry.freq <= bands[i].maximumFreq)
+          {
+            targetBand = i;
+            break;
+          }
+        }
+
+        // Save current band state
+        bands[bandIdx].currentFreq = currentFrequency + currentBFO / 1000;
+
+        // Switch to target band
+        bandIdx = targetBand;
+        bands[bandIdx].currentFreq = entry.freq;
+        if (bands[bandIdx].bandMode != AM)
+          bands[bandIdx].currentStepIdx = defaultStepIdx[AM];
+        bands[bandIdx].bandMode = AM;
+
+        useBand(&bands[bandIdx]);
+        identifyFrequency(currentFrequency + currentBFO / 1000);
+        prefsRequestSave(SAVE_ALL);
+      }
+      currentCmd = CMD_NONE;
+      break;
+    }
     default:                return(false);
   }
 
@@ -1298,18 +1743,89 @@ static void drawWiFiMode(int x, int y, int sx)
 {
   drawCommon(settings[MENU_WIFIMODE], x, y, sx, true);
 
-  int count = ITEM_COUNT(wifiModeDesc);
+  int count = ITEM_COUNT(wifiSubDesc);
   for(int i=-2 ; i<3 ; i++)
   {
+    if (count < 5 && ((wifiSubmenuIdx+i) < 0 || (wifiSubmenuIdx+i) >= count)) {
+      continue;
+    }
+
     if(i==0) {
-      drawZoomedMenu(wifiModeDesc[abs((wifiModeIdx+count+i)%count)]);
+      drawZoomedMenu(wifiSubDesc[abs((wifiSubmenuIdx+count+i)%count)]);
       spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
     } else {
       spr.setTextColor(TH.menu_item);
     }
 
     spr.setTextDatum(MC_DATUM);
-    spr.drawString(wifiModeDesc[abs((wifiModeIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+    spr.drawString(wifiSubDesc[abs((wifiSubmenuIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+  }
+}
+
+static void drawWiFiState(int x, int y, int sx)
+{
+  drawCommon("Wi-Fi State", x, y, sx, true);
+
+  const char* states[] = { "Off", "On" };
+  int count = 2;
+  for(int i=-2 ; i<3 ; i++)
+  {
+    if (count < 5 && ((wifiEnabled+i) < 0 || (wifiEnabled+i) >= count)) {
+      continue;
+    }
+
+    if(i==0) {
+      drawZoomedMenu(states[abs((wifiEnabled+count+i)%count)]);
+      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+    } else {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(states[abs((wifiEnabled+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+  }
+}
+
+static void drawBatteryMode(int x, int y, int sx)
+{
+  drawCommon(settings[MENU_BATTERY], x, y, sx, true);
+
+  const char *batteryModeDesc[] = { "Voltage", "Percent", "Off" };
+  int count = 3;
+  for(int i=-2 ; i<3 ; i++)
+  {
+    if(i==0) {
+      drawZoomedMenu(batteryModeDesc[abs((batteryDisplayMode+count+i)%count)]);
+      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+    } else {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(batteryModeDesc[abs((batteryDisplayMode+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
+  }
+}
+
+static void drawEibiMenu(int x, int y, int sx)
+{
+  drawCommon(settings[MENU_LOADEIBI], x, y, sx, true);
+
+  int count = ITEM_COUNT(eibiSubDesc);
+  for(int i=-2 ; i<3 ; i++)
+  {
+    if(i==0) {
+      drawZoomedMenu(eibiSubDesc[abs((eibiSubmenuIdx+count+i)%count)]);
+      spr.setTextColor(TH.menu_hl_text, TH.menu_hl_bg);
+    } else {
+      spr.setTextColor(TH.menu_item);
+    }
+
+    if (count < 5 && ((eibiSubmenuIdx+i) < 0 || (eibiSubmenuIdx+i) >= count)) {
+      continue;
+    }
+
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(eibiSubDesc[abs((eibiSubmenuIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), 2);
   }
 }
 
@@ -1735,12 +2251,15 @@ void drawSideBar(uint16_t cmd, int x, int y, int sx)
     case CMD_USBMODE:    drawUSBMode(x, y, sx);    break;
     case CMD_BLEMODE:     drawBleMode(x, y, sx);     break;
     case CMD_WIFIMODE:    drawWiFiMode(x, y, sx);   break;
+    case CMD_WIFI_STATE:  drawWiFiState(x, y, sx);  break;
+    case CMD_BATTERY:     drawBatteryMode(x, y, sx); break;
     case CMD_ZOOM:       drawZoom(x, y, sx);        break;
     case CMD_SCROLL:     drawScrollDir(x, y, sx);   break;
     case CMD_SQUELCH:    drawSquelch(x, y, sx);    break;
     case CMD_CPU:        drawCpuMenu(x, y, sx);       break;
     case CMD_CPU_USAGE:  drawCpuUsage(x, y, sx);      break;
     case CMD_CPU_FREQ:   drawCpuFreq(x, y, sx);       break;
+    case CMD_EIBI_MENU:  drawEibiMenu(x, y, sx);      break;
     default:             drawInfo(x, y, sx);           break;
   }
 }
