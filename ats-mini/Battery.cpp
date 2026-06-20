@@ -162,9 +162,10 @@ bool drawBattery(int x, int y)
         textColor = 0x0000; // Black for high contrast on filled color
       }
       
+      spr.setTextFont(1);
       spr.setTextColor(textColor);
       spr.setTextDatum(MC_DATUM);
-      
+
       if (batteryDisplayMode == 0) // Voltage
       {
         sprintf(buf, "%.1f", batteryVolts);
