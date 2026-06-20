@@ -1,7 +1,4 @@
 #include "driver/rtc_io.h"
-#include "driver/gpio.h"
-#include "esp_pm.h"
-#include "esp_sleep.h"
 #include "Common.h"
 #include "Ble.h"
 #include "Themes.h"
@@ -209,78 +206,57 @@ bool sleepOn(int x)
 
     if(sleepModeIdx == SLEEP_LIGHT)
     {
-      // BLE-friendly light sleep: instead of calling esp_light_sleep_start()
-      // in a blocking loop (which kills the BLE controller), enable the IDF
-      // power-management framework. The FreeRTOS idle hook then drops the
-      // CPU into light sleep between BLE/timer events automatically, so an
-      // already-connected iOS client stays connected and advertising
-      // continues throughout sleep.
-      //
-      // The min freq must be 40 MHz (XTAL). The max freq is whatever the
-      // user picked in Settings -> CPU Freq — clamped against 80 MHz lower
-      // bound because the radio needs PLL-rate I2C.
-      const int cpuFreqValues[] = {80, 160, 240};
-      int maxFreq = (cpuFreqIdx < 3) ? cpuFreqValues[cpuFreqIdx] : 80;
+      // Disable WiFi
+      netStop();
 
-      esp_pm_config_t pmCfg = {
-        .max_freq_mhz       = maxFreq,
-        .min_freq_mhz       = 40,
-        .light_sleep_enable = true,
-      };
-      esp_err_t pmErr = esp_pm_configure(&pmCfg);
-      if(pmErr != ESP_OK) {
-        Serial.printf("esp_pm_configure failed: %d, falling back to manual sleep\n", pmErr);
-      }
+      // Disable BLE
+      bleStop();
 
-      // Enable GPIO wakeup for the encoder button (works with PM auto-sleep,
-      // unlike ext0 which only fires on a manual esp_light_sleep_start()).
-      gpio_wakeup_enable((gpio_num_t)ENCODER_PUSH_BUTTON, GPIO_INTR_LOW_LEVEL);
-      esp_sleep_enable_gpio_wakeup();
+      // Drop CPU to 40 MHz (XTAL, PLL off)
+      setCpuFrequencyMhz(40);
 
-      // Unmute squelch (the speaker amp stays powered so audio still plays
-      // when waking briefly for BLE events, but squelch can stay disabled).
+      // Unmute squelch
       if(muteOn(MUTE_SQUELCH) && !muteOn(MUTE_MAIN)) muteOn(MUTE_FORCE, false);
 
-      // Wait for the user to long-press the encoder to exit sleep.
-      // The CPU dips in and out of light sleep between iterations thanks to
-      // automatic light-sleep PM; this loop is mostly idle.
-      pb1.reset();
-      bool wasLongPressed = false;
-      while(!wasLongPressed)
+      while(true)
       {
-        // Short click exits sleep when timeout is enabled (legacy behaviour)
-        ButtonTracker::State pb1st = pb1.update(digitalRead(ENCODER_PUSH_BUTTON) == LOW, 0);
-        if(currentSleep && pb1st.isPressed)
+        esp_sleep_enable_ext0_wakeup((gpio_num_t)ENCODER_PUSH_BUTTON, LOW);
+        rtc_gpio_pullup_en((gpio_num_t)ENCODER_PUSH_BUTTON);
+        rtc_gpio_pulldown_dis((gpio_num_t)ENCODER_PUSH_BUTTON);
+        esp_light_sleep_start();
+
+        // Waking up here
+        if(currentSleep) break; // Short click is enough to exit from sleep if timeout is enabled
+
+        // Wait for a long press, otherwise enter the sleep again
+        pb1.reset(); // Reset the button state (its timers could be stale due to CPU sleep)
+
+        bool wasLongPressed = false;
+        while(true)
         {
-          // Drain the press so the wake doesn't re-trigger a menu click
-          while(pb1.update(digitalRead(ENCODER_PUSH_BUTTON) == LOW, 0).isPressed)
-            delay(50);
-          break;
+          ButtonTracker::State pb1st = pb1.update(digitalRead(ENCODER_PUSH_BUTTON) == LOW, 0);
+          wasLongPressed |= pb1st.isLongPressed;
+          if(wasLongPressed || !pb1st.isPressed) break;
+          delay(100);
         }
-        wasLongPressed = pb1st.isLongPressed;
-        // Service BLE while sleeping — the PM idle hook puts us back to
-        // sleep between events, so this stays power-frugal.
-        delay(50);
+
+        if(wasLongPressed) break;
       }
-
-      // Tear down PM auto-sleep
-      gpio_wakeup_disable((gpio_num_t)ENCODER_PUSH_BUTTON);
-      esp_pm_config_t pmOff = {
-        .max_freq_mhz       = maxFreq,
-        .min_freq_mhz       = maxFreq,
-        .light_sleep_enable = false,
-      };
-      esp_pm_configure(&pmOff);
-
+      // Reenable the pin as well as the display
+      rtc_gpio_pullup_dis((gpio_num_t)ENCODER_PUSH_BUTTON);
+      rtc_gpio_pulldown_dis((gpio_num_t)ENCODER_PUSH_BUTTON);
+      rtc_gpio_deinit((gpio_num_t)ENCODER_PUSH_BUTTON);
       pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
       if(muteOn(MUTE_SQUELCH) && !muteOn(MUTE_MAIN)) muteOn(MUTE_FORCE, true);
 
-      // Restore CPU frequency to whatever the user picked (PM may have
-      // settled it at min during sleep)
-      setCpuFrequencyMhz(maxFreq);
+      // Restore CPU frequency before restarting radios
+      setCpuFrequencyMhz(80);
 
       sleepOn(false);
-      // BLE and WiFi stayed alive — nothing to restart.
+
+      // Restart BLE and WiFi
+      bleInit(bleModeIdx);
+      netInit(wifiModeIdx, false);
     }
   }
   else if((x==0) && sleep_on)

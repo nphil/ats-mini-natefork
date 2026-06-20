@@ -107,20 +107,6 @@ char *getWiFiIPAddress()
   return strcpy(ip, WiFi.status()==WL_CONNECTED ? WiFi.localIP().toString().c_str() : "");
 }
 
-// Returns the best IP for HTTP OTA: STA IP when connected to a router,
-// AP IP when the device is acting as an access point.
-char *getOTAIPAddress()
-{
-  static char ip[16];
-  wifi_mode_t mode = WiFi.getMode();
-  if ((mode == WIFI_STA || mode == WIFI_AP_STA) && WiFi.status() == WL_CONNECTED)
-    return strcpy(ip, WiFi.localIP().toString().c_str());
-  if (mode == WIFI_AP || mode == WIFI_AP_STA)
-    return strcpy(ip, WiFi.softAPIP().toString().c_str());
-  ip[0] = '\0';
-  return ip;
-}
-
 //
 // Stop WiFi hardware
 //
@@ -725,21 +711,4 @@ const String webConfigPage()
   "</TABLE>"
 "</FORM>"
 );
-}
-
-//
-// Save WiFi credentials from the on-device menu.
-// Stores SSID and password in the first network slot (clearing slots 2 & 3)
-// so wifiConnect() will use them on the next netInit(NET_CONNECT) call.
-//
-void wifiSaveCredentials(const String& ssid, const String& password)
-{
-  prefs.begin("network", false, STORAGE_PARTITION);
-  prefs.putString("wifissid1", ssid);
-  prefs.putString("wifipass1", password);
-  prefs.putString("wifissid2", "");
-  prefs.putString("wifipass2", "");
-  prefs.putString("wifissid3", "");
-  prefs.putString("wifipass3", "");
-  prefs.end();
 }

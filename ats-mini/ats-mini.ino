@@ -4,7 +4,6 @@
 
 #include "Common.h"
 #include <Wire.h>
-#include <esp_ota_ops.h>
 #include "Rotary.h"
 #include "Button.h"
 #include "Menu.h"
@@ -15,7 +14,6 @@
 #include "EIBI.h"
 #include "Remote.h"
 #include "Ble.h"
-#include "Recovery.h"
 
 // SI473/5 and UI
 #define MIN_ELAPSED_TIME         5  // 300
@@ -117,23 +115,42 @@ NordicUART BLESerial = NordicUART(RECEIVER_NAME);
 //
 void setup()
 {
-  // ── Bring the display up immediately ───────────────────────────────────────
-  // Doing this before anything else means the user can see the firmware is
-  // running, the version number is visible, and recovery mode can show its UI
-  // without needing to re-initialise the hardware.
+  // Enable serial port
+  Serial.begin(115200);
+
+  // Encoder pins. Enable internal pull-ups
+  pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
+  pinMode(ENCODER_PIN_A, INPUT_PULLUP);
+  pinMode(ENCODER_PIN_B, INPUT_PULLUP);
+
+  // Enable audio amplifier
+  // Initally disable the audio amplifier until the SI4732 has been setup
+  pinMode(PIN_AMP_EN, OUTPUT);
+  digitalWrite(PIN_AMP_EN, LOW);
+
+  // Enable SI4732 VDD
   pinMode(PIN_POWER_ON, OUTPUT);
   digitalWrite(PIN_POWER_ON, HIGH);
-  delay(100);  // LDO settle — also covers the SI4732 power-on requirement
+  delay(100);
 
-  ledcAttach(PIN_LCD_BL, 16000, 8);
-  ledcWrite(PIN_LCD_BL, 0);
+  // The line below may be necessary to setup I2C pins on ESP32
+  Wire.begin(ESP32_I2C_SDA, ESP32_I2C_SCL);
 
+  // TFT display brightness control (PWM)
+  // Note: At brightness levels below 100%, switching from the PWM may cause power spikes and/or RFI
+  ledcAttach(PIN_LCD_BL, 16000, 8);  // Pin assignment, 16kHz, 8-bit
+  ledcWrite(PIN_LCD_BL, 0);          // Default value 0%
+
+  // TFT display setup
   tft.begin();
   tft.setRotation(3);
 
-  // Detect and fix mirrored / inverted display variants
+  // Detect and fix the mirrored & inverted display
   // https://github.com/esp32-si4732/ats-mini/issues/41
   uint8_t did3 = tft.readcommand8(ST7789_RDDID, 3);
+  // 0x048181B3 - the original display
+  // 0x04858552 - high gamma display
+  // 0x00009307 - inverted & mirrored display
   if(did3 == 0x93)
   {
     tft.invertDisplay(0);
@@ -143,74 +160,12 @@ void setup()
   else if(did3 == 0x85)
   {
     tft.writecommand(0x26); // GAMSET
-    tft.writedata(8);
-    tft.writecommand(0x55); // WRCACE
-    tft.writedata(0xB1);
+    tft.writedata(8);       // Gamma Curve 3
+
+    tft.writecommand(0x55); // WRCACE (content adaptive brightness and color)
+    tft.writedata(0xB1);    // High enhancement, UI mode
   }
 
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tft.setCursor(6, 6);
-  tft.print("ATS-Mini");
-  tft.setTextSize(1);
-  tft.setCursor(6, 32);
-  tft.print(getVersion(true));
-  ledcWrite(PIN_LCD_BL, 200);  // turn backlight on — firmware version visible
-
-  // Show previous reset reason — stays visible throughout boot so a crash
-  // loop leaves the last-completed step on screen for diagnosis.
-  {
-    esp_reset_reason_t r = esp_reset_reason();
-    const char* rstStr;
-    uint16_t rstCol;
-    switch(r) {
-      case ESP_RST_PANIC:    rstStr = "PANIC";    rstCol = TFT_RED;    break;
-      case ESP_RST_WDT:      rstStr = "WDT";      rstCol = 0xFB00 /*orange*/; break;
-      case ESP_RST_POWERON:  rstStr = "PWR-ON";   rstCol = TFT_GREEN;  break;
-      case ESP_RST_SW:       rstStr = "SW-RST";   rstCol = TFT_YELLOW; break;
-      default:               rstStr = "RESET";    rstCol = TFT_YELLOW; break;
-    }
-    tft.setTextColor(rstCol, TFT_BLACK);
-    char buf[32]; snprintf(buf, sizeof(buf), "Boot: %s", rstStr);
-    tft.setCursor(6, 46);
-    tft.print(buf);
-    // Brief pause so PANIC/WDT reason is visible before display changes
-    if(r == ESP_RST_PANIC || r == ESP_RST_WDT) delay(1500);
-  }
-
-  // Recovery mode: if encoder is held at power-on for >1 s, enter the
-  // WiFi-OTA recovery UI and never return to normal boot.
-  checkRecoveryBoot();
-
-  // Enable serial port
-  Serial.begin(115200);
-
-  // Encoder pins. Enable internal pull-ups
-  pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
-  pinMode(ENCODER_PIN_A, INPUT_PULLUP);
-  pinMode(ENCODER_PIN_B, INPUT_PULLUP);
-
-  // Enable audio amplifier — disabled until SI4732 is ready
-  pinMode(PIN_AMP_EN, OUTPUT);
-  digitalWrite(PIN_AMP_EN, LOW);
-
-  // Boot step helper — updates the status line so the last completed step
-  // stays visible on screen if setup() crashes before the next update.
-  auto bootStep = [](const char* s) {
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    tft.setCursor(6, 56);
-    char buf[40]; snprintf(buf, sizeof(buf), "Step: %-22s", s);
-    tft.print(buf);
-    Serial.print("Step: "); Serial.println(s);
-  };
-
-  bootStep("I2C init");
-  // I2C bus for SI4732 (LDO already settled above)
-  Wire.begin(ESP32_I2C_SDA, ESP32_I2C_SCL);
-
-  bootStep("sprite");
   tft.fillScreen(TH.bg);
   spr.createSprite(320, 170);
   spr.setTextDatum(MC_DATUM);
@@ -235,11 +190,9 @@ void setup()
     while(digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(100);
   }
 
-  bootStep("disk init");
   // Initialize flash file system
   diskInit();
 
-  bootStep("PSRAM check");
   if(!ESP.getPsramSize()) {
     ledcWrite(PIN_LCD_BL, 255);       // Default value 255 = 100%
     tft.setTextSize(2);
@@ -253,7 +206,6 @@ void setup()
   while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
-  bootStep("SI4732 detect");
   // Check for SI4732 connected on I2C interface
   // If the SI4732 is not detected, then halt with no further processing
   rx.setI2CFastModeCustom(800000UL);
@@ -269,7 +221,6 @@ void setup()
     while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
-  bootStep("radio setup");
   rx.setup(RESET_PIN, MW_BAND_TYPE);
   // Comment the line above and uncomment the three lines below if you are using external ref clock (active crystal or signal generator)
   // rx.setRefClock(32768);
@@ -279,7 +230,6 @@ void setup()
   // Attached pin to allows SI4732 library to mute audio as required to minimise loud clicks
   rx.setAudioMuteMcuPin(AUDIO_MUTE);
 
-  bootStep("prefs load");
   // If loading preferences fails...
   if(!prefsLoad(SAVE_SETTINGS|SAVE_VERIFY))
   {
@@ -323,7 +273,6 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
 
-  bootStep("net init");
   // Connect WiFi, if necessary
   netInit(wifiModeIdx);
 
@@ -333,7 +282,6 @@ void setup()
   // Guard: BLE stack needs ~70KB of internal SRAM. If heap is critically
   // low (e.g. sprite fell back to internal RAM due to PSRAM unavailability),
   // skip init rather than trigger a watchdog crash on the first loop tick.
-  bootStep("BLE init");
   Serial.printf("Free heap before BLE init: %u bytes\n", ESP.getFreeHeap());
   if(ESP.getFreeHeap() >= 80000)
   {
@@ -348,12 +296,6 @@ void setup()
 
   // Start low-priority idle-counter tasks for CPU load estimation
   cpuInitTasks();
-
-  bootStep("DONE");
-  // Mark this firmware as valid so the bootloader doesn't roll back to the
-  // previous OTA slot. Called here — after all hardware init succeeds — so
-  // a crash earlier in setup() on the next boot triggers the rollback.
-  esp_ota_mark_app_valid_cancel_rollback();
 }
 
 

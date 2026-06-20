@@ -269,9 +269,6 @@ bool prefsLoad(uint32_t items)
     volume         = prefs.getUChar("Volume", volume);          // Current volume
     bandIdx        = prefs.getUChar("Band", bandIdx);           // Current band
     wifiModeIdx    = prefs.getUChar("WiFiMode", wifiModeIdx);   // WiFi connection mode
-    // Clamp legacy values (NET_AP_CONNECT=2 and NET_SYNC=4) to supported modes
-    if (wifiModeIdx == NET_AP_CONNECT || wifiModeIdx == NET_SYNC) wifiModeIdx = NET_CONNECT;
-    if (wifiModeIdx > NET_CONNECT) wifiModeIdx = NET_OFF;
     currentBrt     = prefs.getUShort("Brightness", currentBrt); // Brightness
     FmAgcIdx       = prefs.getUChar("FmAGC", FmAgcIdx);         // FM AGC/ATTN
     AmAgcIdx       = prefs.getUChar("AmAGC", AmAgcIdx);         // AM AGC/ATTN
