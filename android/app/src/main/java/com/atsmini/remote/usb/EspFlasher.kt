@@ -5,7 +5,8 @@ import java.io.ByteArrayOutputStream
 
 /**
  * Minimal ESP32-S3 serial ROM bootloader flasher (esptool protocol subset:
- * SLIP framing + SYNC / SPI_ATTACH / FLASH_BEGIN / FLASH_DATA / FLASH_END).
+ * SLIP framing + SYNC / SPI_ATTACH / SPI_SET_PARAMS / FLASH_BEGIN / FLASH_DATA /
+ * FLASH_END).
  *
  * No stub loader and no compression — slower than desktop esptool but simple
  * and dependency-free. Works on a port handed over by [UsbSerialManager.takePortForFlashing].
@@ -26,14 +27,20 @@ class EspFlasher(private val port: UsbSerialPort) {
     // We use 360 s (6 min) to be safe on slow chips.
     private val ERASE_TIMEOUT = 360_000
 
-    private val ESP_SYNC         = 0x08
-    private val ESP_SPI_ATTACH   = 0x0D
-    private val ESP_FLASH_BEGIN  = 0x02
-    private val ESP_FLASH_DATA   = 0x03
-    private val ESP_FLASH_END    = 0x04
+    private val ESP_SYNC          = 0x08
+    private val ESP_SPI_ATTACH    = 0x0D
+    private val ESP_SPI_SET_PARAMS = 0x0B
+    private val ESP_FLASH_BEGIN   = 0x02
+    private val ESP_FLASH_DATA    = 0x03
+    private val ESP_FLASH_END     = 0x04
 
-    // 1 KiB blocks — required by ROM (stub uses 4 KiB, but we have no stub).
+    // 1 KiB blocks — required by ROM (stub uses 16 KiB, but we have no stub).
     private val FLASH_BLOCK = 0x400
+
+    // ATS-Mini hardware is an ESP32-S3 with 8 MB QIO flash (both OSPI and QSPI
+    // PSRAM variants). The ROM bootloader needs to be told this geometry via
+    // SPI_SET_PARAMS or it writes with default params and the image bootloops.
+    private val FLASH_SIZE_BYTES = 8 * 1024 * 1024
 
     /** Flash a single [image] at [offset]. Convenience wrapper around [flashParts]. */
     fun flash(offset: Int, image: ByteArray, progress: Progress): Boolean =
@@ -56,9 +63,20 @@ class EspFlasher(private val port: UsbSerialPort) {
             alreadyFlashed += image.size
         }
 
+        // Leave flash download mode and reboot — ONCE, after every partition is
+        // written. (Sending FLASH_END per-partition would reboot the chip out of
+        // the bootloader before the remaining partitions are flashed.)
+        flashFinish()
+
         progress.percent(100)
         progress.status("Done — radio rebooting into new firmware")
         return true
+    }
+
+    /** Leave the ROM download mode and reboot into the freshly flashed app. */
+    private fun flashFinish() {
+        // FLASH_END payload: 0 = reboot/run app, 1 = stay in loader.
+        command(ESP_FLASH_END, ByteArrayOutputStream().apply { writeLe(0) }.toByteArray(), 0)
     }
 
     // --- Sync + SPI attach ------------------------------------------------------
@@ -84,8 +102,26 @@ class EspFlasher(private val port: UsbSerialPort) {
         }
 
         progress.status("Attaching SPI flash…")
+        // ROM SPI_ATTACH takes 8 bytes: <hspi_arg=0> + <is_legacy=0, 0, 0, 0>.
         if (command(ESP_SPI_ATTACH, ByteArray(8), 0) == null) {
             progress.status("SPI_ATTACH failed — check connection and bootloader mode")
+            return false
+        }
+
+        progress.status("Configuring flash parameters…")
+        // Tell the ROM the real flash geometry. esptool always does this on the
+        // ESP32-S3 ROM; skipping it leaves the ROM on default params and the
+        // written image bootloops even though every block "succeeds".
+        val params = ByteArrayOutputStream().apply {
+            writeLe(0)                  // fl_id
+            writeLe(FLASH_SIZE_BYTES)   // total_size (8 MB)
+            writeLe(64 * 1024)          // block_size
+            writeLe(4 * 1024)           // sector_size
+            writeLe(256)                // page_size
+            writeLe(0xFFFF)             // status_mask
+        }.toByteArray()
+        if (command(ESP_SPI_SET_PARAMS, params, 0) == null) {
+            progress.status("SPI_SET_PARAMS failed — check connection and bootloader mode")
             return false
         }
         return true
@@ -101,7 +137,7 @@ class EspFlasher(private val port: UsbSerialPort) {
         progress: Progress,
     ): Boolean {
         val numBlocks = (image.size + FLASH_BLOCK - 1) / FLASH_BLOCK
-        val eraseSize = numBlocks * FLASH_BLOCK  // must be block-aligned, not raw image.size
+        val eraseSize = image.size  // esptool sends the raw image size (erase is sector-granular)
         val sizeMb = image.size / 1024 / 1024
 
         val beginData = ByteArrayOutputStream().apply {
@@ -149,8 +185,6 @@ class EspFlasher(private val port: UsbSerialPort) {
             }
         }
 
-        progress.status("Finishing partition at 0x${offset.toString(16)}…")
-        command(ESP_FLASH_END, ByteArrayOutputStream().apply { writeLe(0) }.toByteArray(), 0)
         return true
     }
 
@@ -208,10 +242,14 @@ class EspFlasher(private val port: UsbSerialPort) {
             writeFrame(buildPacket(op, data, chk))
             val resp = readFrame(timeout)
             if (resp != null && resp.size >= 8 && (resp[1].toInt() and 0xFF) == op) {
-                // ROM response layout: [0x01, op, sz_lo, sz_hi, val×4, data...]
-                // The error flag is the second-to-last byte of the full response.
-                // (data portion is [..., error_byte, status_byte])
-                val statusOk = resp.size < 10 || resp[resp.size - 2].toInt() == 0
+                // ROM response layout: [0x01, op, sz_lo, sz_hi, val×4, status...]
+                // The ESP32-S3 ROM returns 4 trailing status bytes; only the
+                // FIRST (resp[8]) carries the result — 0 = success, non-zero =
+                // failure. The last two are reserved (always 0), so the old
+                // resp[size-2] check looked at a reserved byte and never caught
+                // a rejected block. SYNC is matched on opcode only (esptool does
+                // not status-check it).
+                val statusOk = op == ESP_SYNC || resp.size < 10 || resp[8].toInt() == 0
                 if (statusOk) return resp
             }
         }
