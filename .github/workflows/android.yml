@@ -87,7 +87,7 @@ jobs:
           OUT="ats-mini-${TAG}.apk"
           cp "$SRC" "../${OUT}"
           echo "path=${OUT}" >> "$GITHUB_OUTPUT"
-          echo "Built ${OUT} ($(du -h ../${OUT} | cut -f1))"
+          echo "Built ${OUT} ($(du -h "../${OUT}" | cut -f1))"
 
       - name: Write release notes
         run: |
