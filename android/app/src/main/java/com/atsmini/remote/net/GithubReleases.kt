@@ -10,19 +10,25 @@ object GithubReleases {
 
     data class Asset(val name: String, val url: String, val size: Long)
     data class Firmware(val tag: String, val assets: List<Asset>) {
+        val displayName: String get() = if (tag == "latest") "Latest build" else tag
         fun full() = assets.firstOrNull { it.name.endsWith("-ospi-full.bin") }
         fun flash() = assets.firstOrNull { it.name.endsWith("-ospi-flash.bin") }
         fun ota() = assets.firstOrNull { it.name.endsWith("-ospi-ota.bin") }
     }
 
-    /** Latest non-prerelease firmware release (tag like vX.YY). */
-    fun latestFirmware(): Firmware? {
-        val json = httpGet("https://api.github.com/repos/$REPO/releases?per_page=30") ?: return null
-        val arr = runCatching { JSONArray(json) }.getOrNull() ?: return null
+    /** Returns up to [count] releases. The "latest" pre-release is first if present,
+     *  followed by non-pre-release versioned releases (tag matching ^v[0-9]). */
+    fun listFirmware(count: Int = 10): List<Firmware> {
+        val json = httpGet("https://api.github.com/repos/$REPO/releases?per_page=50") ?: return emptyList()
+        val arr = runCatching { JSONArray(json) }.getOrNull() ?: return emptyList()
+
+        val latestEntry = ArrayList<Firmware>()
+        val versioned = ArrayList<Firmware>()
+
         for (i in 0 until arr.length()) {
             val rel = arr.optJSONObject(i) ?: continue
             val tag = rel.optString("tag_name")
-            if (!Regex("^v[0-9]").containsMatchIn(tag)) continue
+            val isPrerelease = rel.optBoolean("prerelease", false)
             val assetsJson = rel.optJSONArray("assets") ?: continue
             val assets = ArrayList<Asset>()
             for (j in 0 until assetsJson.length()) {
@@ -31,10 +37,23 @@ object GithubReleases {
                     assets.add(Asset(a.optString("name"), a.optString("browser_download_url"), a.optLong("size")))
                 }
             }
-            if (assets.isNotEmpty()) return Firmware(tag, assets)
+            if (assets.isEmpty()) continue
+
+            val fw = Firmware(tag, assets)
+            when {
+                tag == "latest" && isPrerelease -> latestEntry.add(fw)
+                Regex("^v[0-9]").containsMatchIn(tag) && !isPrerelease -> versioned.add(fw)
+            }
         }
-        return null
+
+        val result = ArrayList<Firmware>()
+        result.addAll(latestEntry)
+        result.addAll(versioned)
+        return result.take(count)
     }
+
+    /** Latest non-prerelease firmware release (tag like vX.YY). */
+    fun latestFirmware(): Firmware? = listFirmware(1).firstOrNull()
 
     fun download(url: String, onProgress: (Int) -> Unit): ByteArray? {
         return runCatching {

@@ -35,8 +35,36 @@ class EspFlasher(private val port: UsbSerialPort) {
     // 1 KiB blocks — required by ROM (stub uses 4 KiB, but we have no stub).
     private val FLASH_BLOCK = 0x400
 
-    fun flash(offset: Int, image: ByteArray, progress: Progress): Boolean {
-        // Try to sync first — device may already be in download mode (user pressed BOOT+RESET).
+    /** Flash a single [image] at [offset]. Convenience wrapper around [flashParts]. */
+    fun flash(offset: Int, image: ByteArray, progress: Progress): Boolean =
+        flashParts(listOf(offset to image), progress)
+
+    /** Flash multiple partitions in a single session.
+     *
+     *  [parts] is a list of (flashOffset, imageBytes) pairs. Parts are sorted by
+     *  offset before writing so callers can pass them in any order.
+     */
+    fun flashParts(parts: List<Pair<Int, ByteArray>>, progress: Progress): Boolean {
+        if (!syncAndAttach(progress)) return false
+
+        val sorted = parts.sortedBy { it.first }
+        val totalBytes = sorted.sumOf { it.second.size }
+        var alreadyFlashed = 0
+
+        for ((offset, image) in sorted) {
+            if (!writeImage(offset, image, alreadyFlashed, totalBytes, progress)) return false
+            alreadyFlashed += image.size
+        }
+
+        progress.percent(100)
+        progress.status("Done — radio rebooting into new firmware")
+        return true
+    }
+
+    // --- Sync + SPI attach ------------------------------------------------------
+
+    private fun syncAndAttach(progress: Progress): Boolean {
+        // Try to sync first — device may already be in download mode.
         progress.status("Connecting to ROM bootloader…")
         if (!sync(progress, attempts = 3)) {
             // Not responding yet. Try auto-reset and give it more attempts.
@@ -60,7 +88,18 @@ class EspFlasher(private val port: UsbSerialPort) {
             progress.status("SPI_ATTACH failed — check connection and bootloader mode")
             return false
         }
+        return true
+    }
 
+    // --- Write one partition image -----------------------------------------------
+
+    private fun writeImage(
+        offset: Int,
+        image: ByteArray,
+        alreadyFlashed: Int,
+        totalBytes: Int,
+        progress: Progress,
+    ): Boolean {
         val numBlocks = (image.size + FLASH_BLOCK - 1) / FLASH_BLOCK
         val eraseSize = numBlocks * FLASH_BLOCK  // must be block-aligned, not raw image.size
         val sizeMb = image.size / 1024 / 1024
@@ -73,7 +112,8 @@ class EspFlasher(private val port: UsbSerialPort) {
             writeLe(0)  // encrypted = false — ESP32-S3 ROM requires this 5th field
         }.toByteArray()
 
-        progress.status("Erasing $sizeMb MB flash… (may take several minutes)")
+        val label = if (sizeMb > 0) "$sizeMb MB" else "${image.size / 1024} KB"
+        progress.status("Erasing $label at 0x${offset.toString(16)}… (may take several minutes)")
         if (command(ESP_FLASH_BEGIN, beginData, 0, timeout = ERASE_TIMEOUT) == null) {
             progress.status(
                 "FLASH_BEGIN failed.\n" +
@@ -102,16 +142,15 @@ class EspFlasher(private val port: UsbSerialPort) {
 
             seq++
             sent += len
-            progress.percent(sent * 100 / image.size)
+            val overallSent = alreadyFlashed + sent
+            if (totalBytes > 0) progress.percent(overallSent * 100 / totalBytes)
             if (seq % 64 == 0) {
-                progress.status("Writing… ${sent / 1024} / ${image.size / 1024} KB")
+                progress.status("Writing… ${overallSent / 1024} / ${totalBytes / 1024} KB")
             }
         }
 
-        progress.status("Finishing…")
+        progress.status("Finishing partition at 0x${offset.toString(16)}…")
         command(ESP_FLASH_END, ByteArrayOutputStream().apply { writeLe(0) }.toByteArray(), 0)
-        progress.percent(100)
-        progress.status("Done — radio rebooting into new firmware")
         return true
     }
 
