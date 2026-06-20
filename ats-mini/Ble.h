@@ -5,7 +5,6 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include "host/ble_gap.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -57,8 +56,6 @@ public:
     BLEDevice::getAdvertising()->setName(deviceName);
 
     BLEDevice::setMTU(517);
-    ble_gap_set_prefered_default_le_phy(BLE_GAP_LE_PHY_ANY_MASK, BLE_GAP_LE_PHY_ANY_MASK);
-    ble_gap_write_sugg_def_data_len(251, (251 + 14) * 8);
 
     pServer = BLEDevice::getServer();
     if (pServer == nullptr)
@@ -112,19 +109,17 @@ public:
 
   bool isStarted() { return started; }
 
-  void onConnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
-    ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_ANY_MASK, BLE_GAP_LE_PHY_ANY_MASK, BLE_GAP_LE_PHY_CODED_ANY);
-    ble_gap_set_data_len(desc->conn_handle, 251, (251 + 14) * 8);
-    pServer->updateConnParams(desc->conn_handle, 6, 12, 0, 200);
+  void onConnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) {
+    pServer->updateConnParams(param->connect.remote_bda, 6, 12, 0, 200);
   }
 
-  void onDisconnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
+  void onDisconnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) {
     if (!started) return;
     if (dataConsumed) xSemaphoreGive(dataConsumed);
     pServer->getAdvertising()->start();
   }
 
-  void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc)
+  void onWrite(BLECharacteristic *pCharacteristic, esp_ble_gatts_cb_param_t *param)
   {
     if (pCharacteristic == pRxCharacteristic && dataConsumed)
     {

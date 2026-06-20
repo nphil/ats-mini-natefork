@@ -214,7 +214,7 @@ void setup()
 #else
     tft.println("(try the OSPI f/w version)");
 #endif
-  while(1);
+  while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
   // Check for SI4732 connected on I2C interface
@@ -229,7 +229,7 @@ void setup()
     tft.setTextSize(2);
     tft.setTextColor(TH.text_warn, TH.bg);
     tft.println("Si4732 not detected");
-    while(1);
+    while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
   rx.setup(RESET_PIN, MW_BAND_TYPE);
