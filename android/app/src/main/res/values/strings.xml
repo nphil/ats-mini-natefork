@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">ATS-Mini</string>
+    <string name="tile_label">ATS-Mini</string>
+    <string name="widget_description">ATS-Mini live frequency &amp; signal</string>
+</resources>
