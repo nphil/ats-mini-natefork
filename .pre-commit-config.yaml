@@ -15,6 +15,7 @@ repos:
         exclude: |
           (?x)^(
                 docs/make.bat|
+                android/gradlew.bat|
                 changelog/.*\.md
           )$
         args:
