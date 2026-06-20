@@ -74,9 +74,20 @@ jobs:
 
       - name: Install xcodegen
         run: brew install xcodegen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
 
       - name: Generate Xcode project
         run: cd ios && xcodegen generate --spec project.yml
+
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/DerivedData
+          key: xcode-${{ runner.os }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.h', 'ios/**/*.m', 'ios/project.yml') }}
+          restore-keys: |
+            xcode-${{ runner.os }}-
 
       - name: Build (unsigned)
         run: |
