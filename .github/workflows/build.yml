@@ -42,8 +42,10 @@ jobs:
       matrix:
         board:
           - profile: esp32s3-ospi
-            # If you change this line, change it in sketch.yaml as well
-            fqbn: esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=8M,PSRAM=opi,CPUFreq=80,USBMode=hwcdc,FlashMode=qio,PartitionScheme=custom,DebugLevel=none
+            # If you change this line, change it in sketch.yaml as well.
+            # FlashMode=dio is REQUIRED on octal-PSRAM (PSRAM=opi) boards — QIO
+            # shares pins with the OPI PSRAM and hangs the ROM at ets_loader.c 78.
+            fqbn: esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=8M,PSRAM=opi,CPUFreq=80,USBMode=hwcdc,FlashMode=dio,PartitionScheme=custom,DebugLevel=none
             artifact-suffix: ospi
 
     outputs:
@@ -188,13 +190,21 @@ jobs:
           #   0x10000  recovery firmware  (factory partition, 1.5 MB)
           #   0x190000 main app           (ota_0, 2.75 MB)
           #
+          # Flash mode/freq: dio @ 40 MHz. REQUIRED for octal-PSRAM (PSRAM=opi)
+          # boards — the OPI PSRAM occupies the GPIOs QIO flash needs, so the
+          # flash can only run in 2-data-line DIO mode. A QIO header hangs the
+          # ROM bootloader at "ets_loader.c 78". These bytes live in the
+          # bootloader header at 0x0, so every consumer of this merged image
+          # (desktop esptool, the Android USB flasher, the web flasher) inherits
+          # the correct mode automatically.
+          #
           # Standard merged binary — flash at 0x0 for clean installs.
           # Preserves user settings / LittleFS on re-flash (fills only regions listed).
           python3 -m esptool \
             --chip esp32s3 merge_bin \
             --output "$ARTIFACT/${SLUG}-flash.bin" \
-            --flash_mode qio \
-            --flash_freq 80m \
+            --flash_mode dio \
+            --flash_freq 40m \
             --flash_size 8MB \
             0x0       "$ARTIFACT"/*.ino.bootloader.bin \
             0x8000    "$ARTIFACT"/*.ino.partitions.bin \
@@ -205,8 +215,8 @@ jobs:
           python3 -m esptool \
             --chip esp32s3 merge_bin \
             --output "$ARTIFACT/${SLUG}-full.bin" \
-            --flash_mode qio \
-            --flash_freq 80m \
+            --flash_mode dio \
+            --flash_freq 40m \
             --flash_size 8MB \
             --fill-flash-size 8MB \
             0x0       "$ARTIFACT"/*.ino.bootloader.bin \

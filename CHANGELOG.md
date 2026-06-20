@@ -4,6 +4,12 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.53 (2026-06-20)
+
+### Fixed
+
+- **Boot loop / `ets_loader.c 78` hang on octal-PSRAM boards fixed by switching flash to DIO mode.** Builds were configured with `FlashMode=qio` while also using `PSRAM=opi` (octal PSRAM). On ESP32-S3R8 modules these are physically incompatible — the OPI PSRAM occupies the GPIOs that QIO flash needs for its D2/D3/WP/HOLD lines, so the flash can only run with two data lines (DIO). The QIO header caused the ROM bootloader to read corrupt data while loading the second-stage bootloader and hang at `ets_loader.c 78`, then watchdog-reset in a loop — before any app, recovery, or partition-table code could run. All build profiles and the merged `-flash.bin` / `-full.bin` images now use `FlashMode=dio` at 40 MHz. Because the flash mode lives in the bootloader header at `0x0`, every flashing path (desktop esptool, the Android USB flasher, and the web flasher) inherits the correct setting automatically.
+
 ## 2.44 (2026-05-28)
 
 ### Fixed
