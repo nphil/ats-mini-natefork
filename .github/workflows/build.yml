@@ -172,10 +172,6 @@ jobs:
           # path that varies across runner environments.
           pip install esptool --quiet
 
-          # boot_app0.bin is part of the ESP32 Arduino core and marks
-          # ota_0 as the initial boot target (factory/recovery is the fallback).
-          BOOT_APP0=$(find ~/.arduino15 -name "boot_app0.bin" | head -1)
-
           # Recovery firmware binary (compiled from ats-mini-recovery/)
           RECOVERY=$(find ats-mini-recovery/build -name "*.ino.bin" \
             ! -name "*.bootloader.bin" ! -name "*.partitions.bin" | head -1)
@@ -183,10 +179,12 @@ jobs:
 
           SLUG="ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}"
 
-          # Flash layout (new partition table with factory recovery slot):
+          # Flash layout (factory partition = recovery, always boots first):
           #   0x00000  bootloader
           #   0x08000  partition table
-          #   0x0e000  OTA data (boot_app0.bin → ota_0 on first flash)
+          #   0x0e000  OTA data — intentionally OMITTED so it stays 0xFF;
+          #            the bootloader therefore always falls back to factory
+          #            (recovery). Recovery forwards to ota_0 after countdown.
           #   0x10000  recovery firmware  (factory partition, 1.5 MB)
           #   0x190000 main app           (ota_0, 2.75 MB)
           #
@@ -200,7 +198,6 @@ jobs:
             --flash_size 8MB \
             0x0       "$ARTIFACT"/*.ino.bootloader.bin \
             0x8000    "$ARTIFACT"/*.ino.partitions.bin \
-            0xe000    "$BOOT_APP0" \
             0x10000   "$RECOVERY" \
             0x190000  "$ARTIFACT"/*.ino.bin
 
@@ -214,7 +211,6 @@ jobs:
             --fill-flash-size 8MB \
             0x0       "$ARTIFACT"/*.ino.bootloader.bin \
             0x8000    "$ARTIFACT"/*.ino.partitions.bin \
-            0xe000    "$BOOT_APP0" \
             0x10000   "$RECOVERY" \
             0x190000  "$ARTIFACT"/*.ino.bin
 

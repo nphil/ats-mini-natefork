@@ -1,21 +1,28 @@
 /*
  * ATS-Mini Recovery Firmware
  *
- * Lives in the factory partition (0x10000). Boots when OTA data is
- * erased — triggered by:
- *   - Main app: button held 3 s at power-on
- *   - Main app: 3 consecutive boot failures (boot-loop detection)
- *   - Android app: {"cmd":"recovery"} serial command to main app
+ * Lives in the factory partition (0x10000). Always boots first since OTA
+ * data is left erased (0xFF) — the bootloader falls back to factory when
+ * no valid OTA data is present. Main app erases OTA data on startup so
+ * every power-cycle passes back through this recovery screen.
  *
- * Features:
- *   - WiFi: tries BEAST_ROUTER then IoT; falls back to AP mode
- *   - Web UI: browse to device IP to upload a .bin or trigger GitHub DL
- *   - GitHub download: fetches latest *-ospi-ota.bin and writes to ota_0
+ * Auto-boot behaviour:
+ *   - Shows a 2-second countdown. If button is not held, forwards to ota_0.
+ *   - Boot-loop detection: increments a counter before forwarding; main app
+ *     resets to 0 after successful init. Three consecutive failures -> stays
+ *     in recovery UI.
+ *
+ * Recovery UI (shown when button held or boot-loop detected):
+ *   - WiFi: tries BEAST_ROUTER then IoT; falls back to AP (ATS-Recovery)
+ *   - Web UI: upload .bin or trigger GitHub download
+ *   - GitHub download: fetches latest *-ospi-ota.bin, writes to ota_0
  *   - Serial JSON: always-on status + OTA upload protocol for Android app
  */
 
 #include <Arduino.h>
-#include <TFT_eSPI.h>
+// FS.h + namespace must precede WebServer.h on ESP32 Arduino 3.x
+#include <FS.h>
+using namespace fs;
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
@@ -23,14 +30,17 @@
 #include <Preferences.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+// TFT_eSPI last — it re-defines SPI-related symbols
+#include <TFT_eSPI.h>
 
 // ── Pin definitions ───────────────────────────────────────────────────────────
-#define PIN_LCD_BL    38
-#define PIN_POWER_ON  15
+#define PIN_LCD_BL      38
+#define PIN_POWER_ON    15
+#define PIN_ENCODER_BTN 21  // GPIO21 — same as ENCODER_PUSH_BUTTON in main app
 
 // ── Known WiFi networks (tried in order before AP fallback) ───────────────────
-struct Network { const char* ssid; const char* pass; };
-static const Network NETWORKS[] = {
+struct KnownNet { const char* ssid; const char* pass; };
+static const KnownNet NETWORKS[] = {
   { "BEAST_ROUTER", "appu1989" },
   { "IoT",          "appu1989" },
 };
@@ -127,6 +137,13 @@ static bool otaFinish() {
   otaActive = false;
   if (esp_ota_end(otaHandle) != ESP_OK)            { tftPrint("ERR: ota_end");   return false; }
   if (esp_ota_set_boot_partition(ota0()) != ESP_OK) { tftPrint("ERR: set_boot");  return false; }
+  // Reset boot-loop counter so next cycle forwards cleanly
+  {
+    Preferences bc;
+    bc.begin("recovery", false, "settings");
+    bc.putInt("bootcount", 0);
+    bc.end();
+  }
   return true;
 }
 
@@ -448,6 +465,9 @@ static void connectWifi() {
 void setup() {
   Serial.begin(115200);
 
+  // Encoder button — check early for countdown override
+  pinMode(PIN_ENCODER_BTN, INPUT_PULLUP);
+
   // Power on the LDO so display SPI bus isn't floating
   pinMode(PIN_POWER_ON, OUTPUT);
   digitalWrite(PIN_POWER_ON, HIGH);
@@ -479,9 +499,69 @@ void setup() {
   tft.setTextFont(2);
 
   tftPrint("=== RECOVERY MODE ===");
-
-  // Serial greeting — Android app detects "recovery" mode from this
   Serial.println("{\"mode\":\"recovery\",\"fw\":1}");
+
+  // ── Boot-loop detection + auto-boot countdown ─────────────────────────────
+  // Counter is incremented here before forwarding; main app resets to 0 after
+  // successful init. If counter reaches 3, recovery stays in full UI.
+  {
+    Preferences bc;
+    bc.begin("recovery", false, "settings");
+    int bootCount = bc.getInt("bootcount", 0);
+    bc.end();
+
+    bool buttonHeld = (digitalRead(PIN_ENCODER_BTN) == LOW);
+    bool bootLoopDetected = (bootCount >= 3);
+
+    if (!buttonHeld && !bootLoopDetected) {
+      // 2-second countdown — button hold cancels auto-boot
+      tftPrint("Hold button for recovery UI");
+      for (int i = 2; i > 0 && !buttonHeld; i--) {
+        tftPrintf("Booting in %d...", i);
+        uint32_t t = millis();
+        while (millis() - t < 1000) {
+          if (digitalRead(PIN_ENCODER_BTN) == LOW) { buttonHeld = true; break; }
+          delay(10);
+        }
+      }
+
+      if (!buttonHeld) {
+        // Check that ota_0 partition exists before forwarding
+        const esp_partition_t* p = ota0();
+        if (p) {
+          // Increment counter before jumping — main app resets it on success
+          Preferences bc2;
+          bc2.begin("recovery", false, "settings");
+          bc2.putInt("bootcount", bootCount + 1);
+          bc2.end();
+
+          if (esp_ota_set_boot_partition(p) == ESP_OK) {
+            tftPrint("Booting main app...");
+            delay(300);
+            esp_restart();
+          }
+          // If set_boot_partition failed, fall through to recovery UI
+          tftPrint("ERR: can't boot ota_0");
+        } else {
+          tftPrint("No main app — entering recovery UI");
+        }
+      }
+    }
+
+    // Arriving here: button was held OR boot-loop detected
+    if (bootLoopDetected) {
+      tftPrintf("Boot-loop x%d detected!", bootCount);
+      tftPrint("Flash new firmware.");
+      // Reset counter so next flash attempt cycles normally
+      Preferences bc3;
+      bc3.begin("recovery", false, "settings");
+      bc3.putInt("bootcount", 0);
+      bc3.end();
+    } else {
+      tftPrint("Button held — recovery UI");
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   connectWifi();
 
