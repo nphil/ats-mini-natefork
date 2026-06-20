@@ -109,17 +109,15 @@ public:
 
   bool isStarted() { return started; }
 
-  void onConnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) {
-    pServer->updateConnParams(param->connect.remote_bda, 6, 12, 0, 200);
-  }
+  void onConnect(BLEServer *pServer) {}
 
-  void onDisconnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) {
+  void onDisconnect(BLEServer *pServer) {
     if (!started) return;
     if (dataConsumed) xSemaphoreGive(dataConsumed);
     pServer->getAdvertising()->start();
   }
 
-  void onWrite(BLECharacteristic *pCharacteristic, esp_ble_gatts_cb_param_t *param)
+  void onWrite(BLECharacteristic *pCharacteristic)
   {
     if (pCharacteristic == pRxCharacteristic && dataConsumed)
     {
