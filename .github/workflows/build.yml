@@ -99,9 +99,9 @@ jobs:
           path: |
             ~/.arduino15
             ~/Arduino/libraries
-          key: arduino-esp32-3.3.7-${{ hashFiles('ats-mini/sketch.yaml') }}
+          key: arduino-esp32-3.3.10-${{ hashFiles('ats-mini/sketch.yaml') }}
           restore-keys: |
-            arduino-esp32-3.3.7-
+            arduino-esp32-3.3.10-
 
       - name: Install ESP32 core with retries
         run: |
@@ -110,9 +110,9 @@ jobs:
             https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index || true  # tolerate transient CDN failures on non-ESP32 indexes
           # Skip install if already cached
-          if ! arduino-cli core list | grep -q 'esp32:esp32.*3.3.7'; then
+          if ! arduino-cli core list | grep -q 'esp32:esp32.*3.3.10'; then
             for attempt in 1 2 3; do
-              arduino-cli core install esp32:esp32@3.3.7 && break
+              arduino-cli core install esp32:esp32@3.3.10 && break
               echo "Attempt $attempt failed – waiting 30s before retry..."
               sleep 30
             done

@@ -385,7 +385,7 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
   int16_t cal = (currentMode == USB) ? getCurrentBand()->usbCal :
                 (currentMode == LSB) ? getCurrentBand()->lsbCal : 0;
 
-  static char buf[600];
+  static char buf[700];
   int n = snprintf(buf, sizeof(buf),
     "{\"t\":\"s\","
     "\"f\":%u,\"bfo\":%d,\"cal\":%d,"
@@ -432,6 +432,14 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
     int added = snprintf(buf + n, sizeof(buf) - n,
       ",\"cpu0\":%u,\"cpu1\":%u",
       (unsigned)getCpuLoad(0), (unsigned)getCpuLoad(1));
+    if(added > 0) n += added;
+  }
+
+  // Append WiFi info for OTA: wip=best IP to POST firmware to, wm=mode
+  if(n > 0) {
+    int added = snprintf(buf + n, sizeof(buf) - n,
+      ",\"wip\":\"%s\",\"wm\":%d,\"fw\":%u",
+      getOTAIPAddress(), (int)getWiFiStatus(), (unsigned)VER_APP);
     if(added > 0) n += added;
   }
 
