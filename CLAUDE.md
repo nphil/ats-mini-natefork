@@ -49,6 +49,99 @@ set them up proactively before shipping.
 - **Inline navigation titles** in primary tabs (`.navigationBarTitleDisplayMode(.inline)`)
   to reclaim vertical space.
 
+## Firmware (ESP32-S3 — this repo)
+
+This repo also ships ESP32-S3 firmware (`ats-mini/`) plus an Android
+companion app (`android/`). The findings below are hard-won — read them
+before touching the firmware build, flashing, or boot path.
+
+### Hardware
+
+- **Board: ESP32-S3R8** — 8 MB **octal (OPI) PSRAM** + 8 MB flash, ST7789
+  170×320 display driven over an **8-bit parallel** bus (landscape =
+  320×170, rotation 3), SI4732 receiver on I²C, encoder push-button on
+  **GPIO21**, LCD backlight on GPIO38, power-enable on GPIO15.
+- The QSPI/quad-PSRAM variant exists (`esp32s3-qspi` profile,
+  `PSRAM=enabled`) but is **not** built/released by CI — the shipped board
+  is the OPI variant (`esp32s3-ospi`, `PSRAM=opi`).
+
+### CRITICAL: flash mode MUST be `dio`, never `qio`
+
+On octal-PSRAM boards (`PSRAM=opi`) the OPI PSRAM physically occupies the
+GPIOs that QIO flash needs for its D2/D3/WP/HOLD data lines. The flash can
+therefore only run with **two data lines = DIO mode**. A `qio` bootloader
+header makes the ROM clock four data lines that are wired to the PSRAM, so
+it reads garbage while loading the second-stage bootloader and **hangs at
+`ets_loader.c 78`, then TG0WDT-resets in a loop — before any app, recovery,
+or partition-table code runs.** This looks exactly like a hard brick.
+
+- Set `FlashMode=dio` in **every** FQBN: `.github/workflows/build.yml`
+  matrix, `ats-mini/sketch.yaml` (ospi profile), and
+  `ats-mini-recovery/sketch.yaml`.
+- Set `--flash_mode dio --flash_freq 40m` in **both** `merge_bin` commands
+  in `build.yml` (the `-flash.bin` and `-full.bin` images).
+- Flash mode lives in the **bootloader header at offset `0x0`**, so every
+  flashing path (desktop esptool, Android `EspFlasher.kt`, web esptool-js)
+  inherits it automatically from the released image — no per-flasher logic.
+
+**Reading the boot log** (115200 baud): a healthy boot continues past
+`ets_loader.c` to an `entry 0x403…` line and the IDF bootloader banner
+(`I (xx) boot: …`). If output **stops at `ets_loader.c 78`** with no banner,
+the flash mode is wrong (or the bootloader bytes are corrupt). `rst:0x7
+(TG0WDT_SYS_RST)` in the header is the watchdog resetting a prior hung
+attempt — i.e. a boot loop.
+
+### Recovery architecture (two firmwares, recovery-first)
+
+- Two sketches: `ats-mini/` (main app, runs from **ota_0**) and
+  `ats-mini-recovery/` (minimal recovery, runs from the **factory**
+  partition). `partitions.csv` is identical in both dirs:
+  `factory@0x10000` (1.5 MB), `ota_0@0x190000` (2.75 MB),
+  `ota_1@0x450000`, `littlefs@0x600000` (**unchanged offset — preserves
+  user data on re-flash**), `settings` nvs, `coredump`.
+- **Recovery always boots first.** The merged image intentionally **omits
+  `boot_app0.bin`** at `0xe000`, so OTA data stays `0xFF` and the
+  bootloader always falls back to the factory (recovery) partition.
+- Recovery shows a **2-second countdown** then forwards to ota_0 via
+  `esp_ota_set_boot_partition(ota_0)` + `esp_restart()`. Holding the
+  encoder button (GPIO21) cancels the countdown and stays in the recovery
+  UI.
+- **Boot-loop counter** lives in NVS (`Preferences("recovery", …,
+  "settings")`, key `bootcount`): recovery increments it before
+  forwarding; the main app resets it to `0` at the end of `setup()`. If it
+  reaches **3**, recovery stays in its UI instead of forwarding.
+- The main app **erases OTA data at the very start of `setup()`** so every
+  power-cycle routes back through recovery on the next boot.
+- Recovery features: WiFi (tries `BEAST_ROUTER` then `IoT`, both pass
+  `appu1989`; falls back to AP `ATS-Recovery` / `ats12345`), a web page to
+  upload a `.bin` or trigger a GitHub download of the latest
+  `*-ospi-ota.bin`, and an always-on serial JSON OTA protocol for the
+  Android app.
+
+### ESP32 Arduino 3.x include gotchas (recovery sketch)
+
+- `FS` moved into `namespace fs`. Put `#include <FS.h>` + `using namespace
+  fs;` **before** `#include <WebServer.h>` or you get `'FS' was not
+  declared in this scope`. Include `<TFT_eSPI.h>` **last**.
+- A new core `Network` class collides with any user-defined `struct
+  Network` — name such structs something else (e.g. `KnownNet`).
+
+### Flashing & unbricking
+
+- CI publishes `-flash.bin` (defined regions only — preserves LittleFS) and
+  `-full.bin` (8 MB, every byte filled — for bricked/unknown state). Both
+  flash at `0x0`.
+- **Desktop unbrick** (the definitive recovery, verified working):
+  ```
+  esptool --chip esp32s3 erase_flash
+  esptool --chip esp32s3 write_flash --flash_mode dio --flash_freq 40m \
+      0x0 ats-mini-vX.YY-ospi-full.bin
+  ```
+- The Android USB flasher (`android/.../usb/EspFlasher.kt`) uses the bare
+  ROM protocol (no stub, 1 KB blocks) and writes `full.bin` at `0x0` — same
+  operation as desktop esptool, just slower. It inherits the correct flash
+  mode from the image header, so it needs no mode-specific code.
+
 ## Versioning
 
 - **Patch bumps are handled by CI automatically** — `ios.yml` increments
