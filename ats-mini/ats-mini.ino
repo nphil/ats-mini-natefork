@@ -4,6 +4,8 @@
 
 #include "Common.h"
 #include <Wire.h>
+#include <Preferences.h>
+#include <esp_partition.h>
 #include "Rotary.h"
 #include "Button.h"
 #include "Menu.h"
@@ -122,6 +124,49 @@ void setup()
   pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
   pinMode(ENCODER_PIN_A, INPUT_PULLUP);
   pinMode(ENCODER_PIN_B, INPUT_PULLUP);
+
+  // ── Recovery trigger helper ─────────────────────────────────────────────
+  // Erases OTA data so the bootloader falls back to the factory (recovery)
+  // partition on next restart.
+  auto enterRecovery = []() {
+    const esp_partition_t* ota = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+    if (ota) esp_partition_erase_range(ota, 0, ota->size);
+    esp_restart();
+  };
+
+  // ── Boot-loop detection ─────────────────────────────────────────────────
+  // Increment a counter before any hardware that could crash. The counter is
+  // reset at the end of setup() once everything succeeds. Three consecutive
+  // failures → fall back to recovery.
+  {
+    Preferences bc;
+    bc.begin("recovery", false, "settings");
+    int boots = bc.getInt("bootcount", 0) + 1;
+    bc.putInt("bootcount", boots);
+    bc.end();
+    if (boots >= 3) {
+      Serial.printf("Boot-loop detected (%d), entering recovery\n", boots);
+      enterRecovery();
+    }
+  }
+
+  // ── Button-hold → recovery ──────────────────────────────────────────────
+  // Hold the encoder button for 3 s at power-on to enter recovery mode.
+  // A shorter hold (< 3 s) falls through to the existing preferences-reset
+  // check further down in setup().
+  if (digitalRead(ENCODER_PUSH_BUTTON) == LOW) {
+    uint32_t holdStart = millis();
+    while (digitalRead(ENCODER_PUSH_BUTTON) == LOW) {
+      if (millis() - holdStart >= 3000) {
+        // Brief flash of all-white to confirm recovery trigger before restart
+        ledcAttach(PIN_LCD_BL, 16000, 8);
+        ledcWrite(PIN_LCD_BL, 255);
+        enterRecovery();
+      }
+      delay(10);
+    }
+  }
 
   // Enable audio amplifier
   // Initally disable the audio amplifier until the SI4732 has been setup
@@ -296,6 +341,14 @@ void setup()
 
   // Start low-priority idle-counter tasks for CPU load estimation
   cpuInitTasks();
+
+  // Reset boot-loop counter — we reached this point without crashing
+  {
+    Preferences bc;
+    bc.begin("recovery", false, "settings");
+    bc.putInt("bootcount", 0);
+    bc.end();
+  }
 }
 
 

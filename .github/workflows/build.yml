@@ -6,6 +6,7 @@ on:
       - '**'   # every branch push produces a downloadable artifact
     paths:
       - 'ats-mini/**'
+      - 'ats-mini-recovery/**'
       - 'changelog/**'
       - 'CHANGELOG.md'
       - '.github/workflows/build.yml'
@@ -15,6 +16,7 @@ on:
       - main
     paths:
       - 'ats-mini/**'
+      - 'ats-mini-recovery/**'
       - 'changelog/**'
       - 'CHANGELOG.md'
       - '.github/workflows/build.yml'
@@ -118,6 +120,15 @@ jobs:
             done
           fi
 
+      - name: Compile recovery firmware
+        run: |
+          arduino-cli compile \
+            --fqbn "${{ matrix.board.fqbn }}" \
+            --output-dir ats-mini-recovery/build \
+            ats-mini-recovery/
+          echo "Recovery binary:"
+          ls ats-mini-recovery/build/
+
       - name: Compile firmware
         uses: arduino/compile-sketches@v1
         with:
@@ -162,26 +173,38 @@ jobs:
           pip install esptool --quiet
 
           # boot_app0.bin is part of the ESP32 Arduino core and marks
-          # partition 0 as the OTA boot target (required for a clean first flash).
+          # ota_0 as the initial boot target (factory/recovery is the fallback).
           BOOT_APP0=$(find ~/.arduino15 -name "boot_app0.bin" | head -1)
+
+          # Recovery firmware binary (compiled from ats-mini-recovery/)
+          RECOVERY=$(find ats-mini-recovery/build -name "*.ino.bin" \
+            ! -name "*.bootloader.bin" ! -name "*.partitions.bin" | head -1)
+          echo "Recovery binary: $RECOVERY"
 
           SLUG="ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}"
 
-          # Standard merged binary (~1.7 MB) — flash at 0x0 for normal updates
+          # Flash layout (new partition table with factory recovery slot):
+          #   0x00000  bootloader
+          #   0x08000  partition table
+          #   0x0e000  OTA data (boot_app0.bin → ota_0 on first flash)
+          #   0x10000  recovery firmware  (factory partition, 1.5 MB)
+          #   0x190000 main app           (ota_0, 2.75 MB)
+          #
+          # Standard merged binary — flash at 0x0 for clean installs.
+          # Preserves user settings / LittleFS on re-flash (fills only regions listed).
           python3 -m esptool \
             --chip esp32s3 merge_bin \
             --output "$ARTIFACT/${SLUG}-flash.bin" \
             --flash_mode qio \
             --flash_freq 80m \
             --flash_size 8MB \
-            0x0    "$ARTIFACT"/*.ino.bootloader.bin \
-            0x8000 "$ARTIFACT"/*.ino.partitions.bin \
-            0xe000 "$BOOT_APP0" \
-            0x10000 "$ARTIFACT"/*.ino.bin
+            0x0       "$ARTIFACT"/*.ino.bootloader.bin \
+            0x8000    "$ARTIFACT"/*.ino.partitions.bin \
+            0xe000    "$BOOT_APP0" \
+            0x10000   "$RECOVERY" \
+            0x190000  "$ARTIFACT"/*.ino.bin
 
-          # Full 8 MB image — pads unused regions with 0xFF so every byte of
-          # flash is overwritten, removing any stale data from previous flashes.
-          # Use this when the device is in an unknown/corrupt state.
+          # Full 8 MB image — every byte overwritten (use for bricked devices).
           python3 -m esptool \
             --chip esp32s3 merge_bin \
             --output "$ARTIFACT/${SLUG}-full.bin" \
@@ -189,10 +212,11 @@ jobs:
             --flash_freq 80m \
             --flash_size 8MB \
             --fill-flash-size 8MB \
-            0x0    "$ARTIFACT"/*.ino.bootloader.bin \
-            0x8000 "$ARTIFACT"/*.ino.partitions.bin \
-            0xe000 "$BOOT_APP0" \
-            0x10000 "$ARTIFACT"/*.ino.bin
+            0x0       "$ARTIFACT"/*.ino.bootloader.bin \
+            0x8000    "$ARTIFACT"/*.ino.partitions.bin \
+            0xe000    "$BOOT_APP0" \
+            0x10000   "$RECOVERY" \
+            0x190000  "$ARTIFACT"/*.ino.bin
 
       - name: Upload compiled artifact
         uses: actions/upload-artifact@v4
