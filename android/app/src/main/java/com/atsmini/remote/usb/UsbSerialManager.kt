@@ -98,18 +98,24 @@ class UsbSerialManager(private val context: Context) {
     /**
      * Detach the console reader and hand the raw port to a flashing session.
      * Returns the open port (caller owns it until [resumeAfterFlash]).
+     * Always (re-)applies 115200 8N1 so the ROM bootloader can communicate.
      */
     fun takePortForFlashing(): UsbSerialPort? {
         ioManager?.stop(); ioManager = null
         val existing = port
-        if (existing != null) return existing
-        // Open fresh if we weren't already connected.
-        val driver = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager).firstOrNull() ?: return null
-        if (!usbManager.hasPermission(driver.device)) return null
-        val connection = usbManager.openDevice(driver.device) ?: return null
-        val p = driver.ports.first()
-        p.open(connection)
-        port = p
+        val p = if (existing != null) {
+            existing
+        } else {
+            val driver = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager).firstOrNull() ?: return null
+            if (!usbManager.hasPermission(driver.device)) return null
+            val connection = usbManager.openDevice(driver.device) ?: return null
+            val newPort = driver.ports.first()
+            newPort.open(connection)
+            port = newPort
+            newPort
+        }
+        // ROM bootloader always uses 115200 8N1; reset in case a prior session changed it.
+        runCatching { p.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE) }
         return p
     }
 
