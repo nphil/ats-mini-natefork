@@ -158,6 +158,27 @@ void setup()
   tft.print(getVersion(true));
   ledcWrite(PIN_LCD_BL, 200);  // turn backlight on — firmware version visible
 
+  // Show previous reset reason — stays visible throughout boot so a crash
+  // loop leaves the last-completed step on screen for diagnosis.
+  {
+    esp_reset_reason_t r = esp_reset_reason();
+    const char* rstStr;
+    uint16_t rstCol;
+    switch(r) {
+      case ESP_RST_PANIC:    rstStr = "PANIC";    rstCol = TFT_RED;    break;
+      case ESP_RST_WDT:      rstStr = "WDT";      rstCol = 0xFB00 /*orange*/; break;
+      case ESP_RST_POWERON:  rstStr = "PWR-ON";   rstCol = TFT_GREEN;  break;
+      case ESP_RST_SW:       rstStr = "SW-RST";   rstCol = TFT_YELLOW; break;
+      default:               rstStr = "RESET";    rstCol = TFT_YELLOW; break;
+    }
+    tft.setTextColor(rstCol, TFT_BLACK);
+    char buf[32]; snprintf(buf, sizeof(buf), "Boot: %s", rstStr);
+    tft.setCursor(6, 46);
+    tft.print(buf);
+    // Brief pause so PANIC/WDT reason is visible before display changes
+    if(r == ESP_RST_PANIC || r == ESP_RST_WDT) delay(1500);
+  }
+
   // Recovery mode: if encoder is held at power-on for >1 s, enter the
   // WiFi-OTA recovery UI and never return to normal boot.
   checkRecoveryBoot();
@@ -174,9 +195,22 @@ void setup()
   pinMode(PIN_AMP_EN, OUTPUT);
   digitalWrite(PIN_AMP_EN, LOW);
 
+  // Boot step helper — updates the status line so the last completed step
+  // stays visible on screen if setup() crashes before the next update.
+  auto bootStep = [](const char* s) {
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(6, 56);
+    char buf[40]; snprintf(buf, sizeof(buf), "Step: %-22s", s);
+    tft.print(buf);
+    Serial.print("Step: "); Serial.println(s);
+  };
+
+  bootStep("I2C init");
   // I2C bus for SI4732 (LDO already settled above)
   Wire.begin(ESP32_I2C_SDA, ESP32_I2C_SCL);
 
+  bootStep("sprite");
   tft.fillScreen(TH.bg);
   spr.createSprite(320, 170);
   spr.setTextDatum(MC_DATUM);
@@ -201,9 +235,11 @@ void setup()
     while(digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(100);
   }
 
+  bootStep("disk init");
   // Initialize flash file system
   diskInit();
 
+  bootStep("PSRAM check");
   if(!ESP.getPsramSize()) {
     ledcWrite(PIN_LCD_BL, 255);       // Default value 255 = 100%
     tft.setTextSize(2);
@@ -217,6 +253,7 @@ void setup()
   while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
+  bootStep("SI4732 detect");
   // Check for SI4732 connected on I2C interface
   // If the SI4732 is not detected, then halt with no further processing
   rx.setI2CFastModeCustom(800000UL);
@@ -232,6 +269,7 @@ void setup()
     while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
   }
 
+  bootStep("radio setup");
   rx.setup(RESET_PIN, MW_BAND_TYPE);
   // Comment the line above and uncomment the three lines below if you are using external ref clock (active crystal or signal generator)
   // rx.setRefClock(32768);
@@ -241,6 +279,7 @@ void setup()
   // Attached pin to allows SI4732 library to mute audio as required to minimise loud clicks
   rx.setAudioMuteMcuPin(AUDIO_MUTE);
 
+  bootStep("prefs load");
   // If loading preferences fails...
   if(!prefsLoad(SAVE_SETTINGS|SAVE_VERIFY))
   {
@@ -284,6 +323,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
 
+  bootStep("net init");
   // Connect WiFi, if necessary
   netInit(wifiModeIdx);
 
@@ -293,6 +333,7 @@ void setup()
   // Guard: BLE stack needs ~70KB of internal SRAM. If heap is critically
   // low (e.g. sprite fell back to internal RAM due to PSRAM unavailability),
   // skip init rather than trigger a watchdog crash on the first loop tick.
+  bootStep("BLE init");
   Serial.printf("Free heap before BLE init: %u bytes\n", ESP.getFreeHeap());
   if(ESP.getFreeHeap() >= 80000)
   {
@@ -308,6 +349,7 @@ void setup()
   // Start low-priority idle-counter tasks for CPU load estimation
   cpuInitTasks();
 
+  bootStep("DONE");
   // Mark this firmware as valid so the bootloader doesn't roll back to the
   // previous OTA slot. Called here — after all hardware init succeeds — so
   // a crash earlier in setup() on the next boot triggers the rollback.
