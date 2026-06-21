@@ -56,7 +56,7 @@ static const int FTR_H = 20;
 static const int FTR_Y = H - FTR_H;
 static const int BODY_Y = HDR_H + 2;
 static const int BODY_H = FTR_Y - BODY_Y;
-static const int ITEM_H = 27;
+static const int ITEM_H = 24;   // 5 items fit: 5*24=120 <= BODY_H(126), no footer overlap
 
 // ── Screens ───────────────────────────────────────────────────────────────────
 enum Screen : uint8_t {
@@ -90,9 +90,19 @@ static bool   fullDraw = true;     // true → clear + redraw all; false → onl
 static int    lastSel = -1;        // previously highlighted row (for partial redraw)
 static int    lastStart = -1;      // previous scroll offset (list screens)
 static bool   footerDirty = false; // footer needs refresh (network state changed)
-static bool   wifiOK = false;
-static bool   apMode = false;
-static bool   webOn  = false;
+static bool   wifiOK   = false;
+static bool   adhocOn  = false;
+static bool   webOn    = false;
+
+// Toast shown in footer; takes priority over network status text
+static char     toastMsg[80] = "";
+static uint32_t toastExp     = 0;
+static void showToast(const char* msg, uint32_t ms = 4000) {
+  strncpy(toastMsg, msg, sizeof(toastMsg) - 1);
+  toastMsg[sizeof(toastMsg) - 1] = 0;
+  toastExp = millis() + ms;
+  footerDirty = true; dirty = true;
+}
 
 // ── Background STA connection state ────────────────────────────────────────────
 static bool     staTrying  = false;
@@ -116,12 +126,14 @@ static int encPop() {
 }
 
 static uint32_t btnDownMs = 0;
-static bool btnWas = false, btnUsed = false;
+static bool btnWas = false;
+static int  btnPhase = 0; // 0=none, 1=medium(450ms) fired, 2=long(2s) fired
 static int btnEvent() {
   bool dn = (digitalRead(PIN_BTN) == LOW);
-  if (dn && !btnWas) { btnWas = true; btnDownMs = millis(); btnUsed = false; }
-  if (!dn && btnWas) { btnWas = false; return btnUsed ? 0 : 1; }
-  if (dn && !btnUsed && millis() - btnDownMs > 450) { btnUsed = true; return 2; }
+  if (dn && !btnWas) { btnWas = true; btnDownMs = millis(); btnPhase = 0; }
+  if (!dn && btnWas) { btnWas = false; return (btnPhase == 0) ? 1 : 0; }
+  if (dn && btnPhase == 0 && millis() - btnDownMs >  450) { btnPhase = 1; return 2; }
+  if (dn && btnPhase == 1 && millis() - btnDownMs > 2000) { btnPhase = 2; return 3; }
   return 0;
 }
 
@@ -134,7 +146,19 @@ static bool scanning  = false;
 // ── WiFi keyboard state ───────────────────────────────────────────────────────
 static String kbSSID, kbPass;
 static int    kbRow = 0, kbCol = 0;
+static int    lastKbR = -1, lastKbC = -1; // for partial keyboard redraw
 static bool   kbShift = false, kbNums = false;
+
+// Step the keyboard cursor linearly across all rows (encoder navigation).
+static void kbStep(int dir) {
+  if (dir > 0) {
+    kbCol++;
+    if (kbCol >= kbRowLen(kbRow)) { kbCol = 0; kbRow = (kbRow + 1) % 4; }
+  } else if (dir < 0) {
+    kbCol--;
+    if (kbCol < 0) { kbRow = (kbRow + 3) % 4; kbCol = kbRowLen(kbRow) - 1; }
+  }
+}
 
 // Keyboard layout: rows of: printable | \x7f=DEL | \r=OK | \x01=SHIFT | \x02=NUM
 static const char KB_ALPHA[4][12] = {
@@ -231,28 +255,38 @@ static int listStart(int s, int total, int vis) {
 static void drawHeader(const char* title) {
   tft.fillRect(0, 0, W, HDR_H, D_PURPLE);
   tft.setTextColor(D_BG, D_PURPLE);
-  tft.setTextFont(2);
+  tft.setTextFont(1);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString("ATS-Mini", 5, HDR_H / 2);
+  tft.drawString("ATS-Mini Recovery", 5, HDR_H / 2);
+  tft.setTextFont(2);
   tft.setTextDatum(MR_DATUM);
   tft.drawString(title, W - 5, HDR_H / 2);
 }
 
 static void drawFooter() {
   tft.fillRect(0, FTR_Y, W, FTR_H, D_LINE);
-  tft.setTextColor(D_COMMENT, D_LINE);
   tft.setTextFont(1);
   tft.setTextDatum(ML_DATUM);
   char buf[80];
-  if (wifiOK)
-    snprintf(buf, sizeof(buf), "WiFi: %s   %s",
-             WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
-  else if (apMode)
-    snprintf(buf, sizeof(buf), "AP: %s   %s   (STA connecting...)",
-             AP_SSID, WiFi.softAPIP().toString().c_str());
-  else
-    strcpy(buf, "WiFi: starting...");
-  tft.drawString(buf, 4, FTR_Y + FTR_H / 2);
+  if (toastMsg[0] && millis() < toastExp) {
+    tft.setTextColor(D_YELLOW, D_LINE);
+    tft.drawString(toastMsg, 4, FTR_Y + FTR_H / 2);
+  } else {
+    toastMsg[0] = 0;
+    tft.setTextColor(D_COMMENT, D_LINE);
+    if (wifiOK)
+      snprintf(buf, sizeof(buf), "WiFi: %s  %s",
+               WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    else if (adhocOn)
+      snprintf(buf, sizeof(buf), "Adhoc: %s  %s",
+               AP_SSID, WiFi.softAPIP().toString().c_str());
+    else if (staTrying)
+      snprintf(buf, sizeof(buf), "Connecting: %s...",
+               KNOWN[staTryIdx < KNOWN_CNT ? staTryIdx : 0].ssid);
+    else
+      strcpy(buf, "WiFi: not connected");
+    tft.drawString(buf, 4, FTR_Y + FTR_H / 2);
+  }
 }
 
 static void clearBody() {
@@ -276,23 +310,58 @@ static void drawItem(int row, const char* label, const char* value, bool hi) {
   }
 }
 
-static void drawProgressBar(int y, size_t done, size_t total) {
-  static const int bw = W - 24;
-  tft.drawRect(12, y, bw, 14, D_PURPLE);
-  if (total > 0) {
-    int fill = (int)((uint64_t)done * (bw - 2) / total);
-    tft.fillRect(13, y + 1, fill, 12, D_PURPLE);
+// ── OTA progress display (flicker-free: frame drawn once, only bar+text update) ─
+static int otaBarY = 0;
+
+static void drawOtaFrame(const char* phase) {
+  int y0 = BODY_Y;
+  tft.fillRect(0, y0, W, FTR_Y - y0, D_BG);   // one-time body clear
+  tft.setTextColor(D_CYAN, D_BG);
+  tft.setTextFont(2);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(otaTag[0] ? otaTag : phase, W / 2, y0 + 12);
+  otaBarY = y0 + 34;
+  tft.drawRect(12, otaBarY, W - 24, 16, D_PURPLE);   // empty bar frame
+}
+
+static void drawOtaUpdate(uint32_t kbps) {
+  int bw = W - 24;
+  if (otaTotal > 0) {
+    int fill = (int)((uint64_t)otaWritten * (bw - 2) / otaTotal);
+    tft.fillRect(13, otaBarY + 1, fill, 14, D_GREEN);  // monotonic — just paint done portion
   }
-  if (total > 0) {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%u%%  (%u / %u KB)",
-             (unsigned)(done * 100 / total),
-             (unsigned)(done / 1024), (unsigned)(total / 1024));
-    tft.setTextColor(D_FG, D_BG);
-    tft.setTextFont(1);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString(buf, W / 2, y + 22);
+  char buf[48];
+  int ly = otaBarY + 28;
+  tft.fillRect(0, ly - 8, W, 16, D_BG);
+  if (otaTotal > 0)
+    snprintf(buf, sizeof(buf), "%u%%   %u / %u KB",
+             (unsigned)(otaWritten * 100 / otaTotal),
+             (unsigned)(otaWritten / 1024), (unsigned)(otaTotal / 1024));
+  else
+    snprintf(buf, sizeof(buf), "%u KB", (unsigned)(otaWritten / 1024));
+  tft.setTextColor(D_FG, D_BG);
+  tft.setTextFont(2); tft.setTextDatum(MC_DATUM);
+  tft.drawString(buf, W / 2, ly);
+
+  int sy = otaBarY + 48;
+  tft.fillRect(0, sy - 6, W, 12, D_BG);
+  if (otaTotal > 0 && kbps > 0) {
+    uint32_t remain = (otaTotal - otaWritten) / 1024;
+    snprintf(buf, sizeof(buf), "%u KB/s   ETA %us", (unsigned)kbps, (unsigned)(remain / (kbps ? kbps : 1)));
+  } else {
+    snprintf(buf, sizeof(buf), "%u KB/s", (unsigned)kbps);
   }
+  tft.setTextColor(D_COMMENT, D_BG);
+  tft.setTextFont(1); tft.setTextDatum(MC_DATUM);
+  tft.drawString(buf, W / 2, sy);
+}
+
+static void drawOtaError(const char* msg) {
+  int sy = otaBarY + 48;
+  tft.fillRect(0, sy - 8, W, 16, D_BG);
+  tft.setTextColor(D_RED, D_BG);
+  tft.setTextFont(2); tft.setTextDatum(MC_DATUM);
+  tft.drawString(msg, W / 2, sy);
 }
 
 // Generic small menu renderer with flicker-free partial redraw.
@@ -357,7 +426,7 @@ static bool splashAndDecide() {
 
   tft.setTextColor(D_YELLOW, D_BG);
   tft.setTextFont(1);
-  tft.drawString("Hold encoder to enter recovery", W / 2, 112);
+  tft.drawString("Press encoder to enter recovery", W / 2, 112);
 
   Preferences bc;
   bc.begin("recovery", false, "settings");
@@ -417,9 +486,9 @@ static void drawMain() {
 }
 
 static void drawNetwork() {
-  static const char* labels[] = { "WiFi Scan", "OTA Update", "Web Server", "Back" };
-  const char* values[] = { nullptr, nullptr, webOn ? "ON" : "OFF", nullptr };
-  renderMenu("Network", labels, values, 4);
+  static const char* labels[] = { "WiFi Scan", "OTA Update", "Adhoc Network", "Web Server", "Back" };
+  const char* values[] = { nullptr, nullptr, adhocOn ? "ON" : "OFF", webOn ? "ON" : "OFF", nullptr };
+  renderMenu("Network", labels, values, 5);
 }
 
 static void drawEraseConfirm() {
@@ -530,12 +599,8 @@ static void drawKbKey(int row, int col) {
   tft.drawString(label, x + kw / 2, y + KEY_H / 2);
 }
 
-static void drawKb() {
-  if (fullDraw) {
-    tft.fillScreen(D_BG);
-    drawHeader("WiFi Password");
-  }
-  // Pass display area y=22..54
+// Redraw just the SSID + masked-password band at the top.
+static void drawKbBand() {
   tft.fillRect(0, HDR_H, W, 32, D_LINE);
   tft.setTextFont(1);
   tft.setTextDatum(ML_DATUM);
@@ -547,10 +612,26 @@ static void drawKb() {
   dots += '_';
   tft.setTextColor(D_FG, D_LINE);
   tft.drawString(("Pass: " + dots).c_str(), 5, HDR_H + 22);
+}
 
-  for (int r = 0; r < 4; r++)
-    for (int c = 0; c < kbRowLen(r); c++)
-      drawKbKey(r, c);
+static void drawKb() {
+  if (fullDraw) {
+    tft.fillScreen(D_BG);
+    drawHeader("WiFi Password");
+    drawKbBand();
+    for (int r = 0; r < 4; r++)
+      for (int c = 0; c < kbRowLen(r); c++)
+        drawKbKey(r, c);
+  } else {
+    // Always refresh the band (password may have changed); only repaint the
+    // two keys whose highlight changed to avoid flicker.
+    drawKbBand();
+    if (lastKbR >= 0 && (lastKbR != kbRow || lastKbC != kbCol) &&
+        lastKbC < kbRowLen(lastKbR))
+      drawKbKey(lastKbR, lastKbC);
+    drawKbKey(kbRow, kbCol);
+  }
+  lastKbR = kbRow; lastKbC = kbCol;
 }
 
 static const char* otaLabel(int i, char* buf) {
@@ -573,16 +654,6 @@ static void drawOtaList() {
   renderList("OTA: Pick Release", relCnt + 1, otaLabel, nullptr);
 }
 
-static void drawOtaProgress() {
-  int y = BODY_Y;
-  tft.fillRect(0, y, W, FTR_Y - y, D_BG);
-  tft.setTextColor(D_FG, D_BG);
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString(otaTag[0] ? otaTag : "Downloading...", W / 2, y + 22);
-  drawProgressBar(y + 48, otaWritten, otaTotal);
-}
-
 static void drawWebSrv() {
   static const char* labels[] = { "Web Server", "Back" };
   const char* values[] = { webOn ? "ON" : "OFF", nullptr };
@@ -600,13 +671,18 @@ static void drawWebSrv() {
     if (webOn) {
       tft.setTextColor(D_GREEN, D_BG);
       tft.drawString("Running", 10, sy);
-      String url = "http://" +
-        (wifiOK ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
+      String ip = wifiOK ? WiFi.localIP().toString()
+                         : adhocOn ? WiFi.softAPIP().toString() : String("0.0.0.0");
       tft.setTextColor(D_CYAN, D_BG);
       tft.setTextFont(1);
-      tft.drawString(url.c_str(), 10, sy + 20);
+      tft.drawString(("http://" + ip).c_str(), 10, sy + 20);
       tft.setTextColor(D_COMMENT, D_BG);
-      tft.drawString("Join '" + String(AP_SSID) + "' then open the URL", 10, sy + 34);
+      if (adhocOn && !wifiOK)
+        tft.drawString("Join 'ATS-Recovery' (open) then open URL", 10, sy + 34);
+      else if (wifiOK)
+        tft.drawString("Connect to same WiFi network", 10, sy + 34);
+      else
+        tft.drawString("Start Adhoc or connect WiFi first", 10, sy + 34);
     } else {
       tft.setTextColor(D_RED, D_BG);
       tft.drawString("Stopped", 10, sy);
@@ -643,35 +719,52 @@ static void redraw() {
 // WiFi helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Bring up AP immediately + start STA connection in the background (non-blocking).
+// Start STA-only connection to known networks in the background (non-blocking).
+// No AP is started by default; user can start adhoc from Network menu.
 static void netInit() {
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  apMode = true;
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);                   // disable modem sleep — big latency/throughput win
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);    // max TX power for range/stability
   staTrying = true; staTryIdx = 0; staTryStart = millis();
   WiFi.begin(KNOWN[0].ssid, KNOWN[0].pass);
+  showToast("Connecting to WiFi...", 8000);
 }
 
 // Advance the background STA connection. Call every loop; never blocks.
 static void netTick() {
+  // Expire toast when its timer runs out
+  if (toastMsg[0] && millis() >= toastExp) {
+    toastMsg[0] = 0; footerDirty = true; dirty = true;
+  }
   if (!staTrying) return;
   if (WiFi.status() == WL_CONNECTED) {
     wifiOK = true; staTrying = false;
-    footerDirty = true; dirty = true;
+    char buf[80];
+    snprintf(buf, sizeof(buf), "Connected: %s  %s",
+             WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    showToast(buf, 5000);
     Serial.printf("{\"wifi\":\"connected\",\"ssid\":\"%s\",\"ip\":\"%s\"}\n",
       WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
     return;
   }
   if (millis() - staTryStart > 7000) {
     staTryIdx++;
-    if (staTryIdx >= KNOWN_CNT) { staTrying = false; return; } // stay AP-only
+    if (staTryIdx >= KNOWN_CNT) {
+      staTrying = false;
+      showToast("WiFi: no known networks found", 5000);
+      return;
+    }
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Trying %s...", KNOWN[staTryIdx].ssid);
+    showToast(buf, 8000);
     WiFi.begin(KNOWN[staTryIdx].ssid, KNOWN[staTryIdx].pass);
     staTryStart = millis();
   }
 }
 
-// Blocking connect for the password-entry flow (draws a spinner). Keeps AP up.
+// Blocking connect for the password-entry flow (draws a spinner). Keeps adhoc AP up if running.
 static bool connectToNetwork(const char* ssid, const char* pass) {
+  WiFi.mode(adhocOn ? WIFI_AP_STA : WIFI_STA);
   WiFi.begin(ssid, pass);
   uint32_t t = millis();
   int spin = 0;
@@ -691,6 +784,33 @@ static bool connectToNetwork(const char* ssid, const char* pass) {
   return false;
 }
 
+// Quick TCP-based internet reachability check (uses Google DNS port 53).
+static bool hasInternet() {
+  if (!wifiOK) return false;
+  WiFiClient c;
+  bool ok = c.connect(IPAddress(8, 8, 8, 8), 53);
+  c.stop();
+  return ok;
+}
+
+// Start an open (no-password) adhoc AP for local flashing.
+static void startAdhoc() {
+  WiFi.mode(wifiOK ? WIFI_AP_STA : WIFI_AP);
+  WiFi.softAP(AP_SSID); // open network, no password
+  adhocOn = true;
+  showToast("Adhoc 'ATS-Recovery' started (open)", 5000);
+  footerDirty = true; dirty = true;
+}
+
+static void stopAdhoc() {
+  WiFi.softAPdisconnect(true);
+  adhocOn = false;
+  WiFi.mode(wifiOK ? WIFI_STA : WIFI_OFF);
+  if (wifiOK) WiFi.reconnect();
+  showToast("Adhoc network stopped", 3000);
+  footerDirty = true; dirty = true;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GitHub releases fetch (streaming JSON parse)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -704,18 +824,27 @@ static bool fetchReleases(int perPage = 25) {
     "https://api.github.com/repos/%s/releases?per_page=%d",
     GITHUB_REPO, perPage);
 
-  WiFiClientSecure client; client.setInsecure();
+  WiFiClientSecure client;
   HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(20000);
-  http.begin(client, apiUrl);
-  http.addHeader("User-Agent", "ATS-Mini-Recovery/2");
-  http.addHeader("Accept", "application/vnd.github.v3+json");
-
-  int code = http.GET();
-  if (code != 200) {
-    snprintf(relErr, sizeof(relErr), "HTTP %d", code);
-    http.end(); return false;
+  int code = 0;
+  bool ok = false;
+  for (int attempt = 1; attempt <= 3 && !ok; attempt++) {
+    client.setInsecure();
+    client.setHandshakeTimeout(20);
+    http.setReuse(false);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(20000);
+    if (!http.begin(client, apiUrl)) { delay(500); continue; }
+    http.addHeader("User-Agent", "ATS-Mini-Recovery/2");
+    http.addHeader("Accept", "application/vnd.github.v3+json");
+    code = http.GET();
+    if (code == 200) { ok = true; break; }
+    http.end();
+    delay(500);
+  }
+  if (!ok) {
+    snprintf(relErr, sizeof(relErr), "Fetch failed (HTTP %d)", code);
+    return false;
   }
 
   int contentLen = http.getSize();
@@ -779,62 +908,98 @@ static bool fetchReleases(int perPage = 25) {
 
 static bool downloadAndFlash(const char* url, const char* tag = "") {
   strncpy(otaTag, tag, sizeof(otaTag) - 1);
+  otaTag[sizeof(otaTag) - 1] = 0;
   cur = SCR_OTA_PROGRESS;
   tft.fillScreen(D_BG);
   drawHeader("Flashing...");
   otaTotal = 0; otaWritten = 0;
-  drawOtaProgress();
+  drawOtaFrame("Connecting...");
+  drawOtaUpdate(0);
 
-  WiFiClientSecure client; client.setInsecure();
+  // Connect with retries — GitHub's CDN redirect + TLS handshake can flake (HTTP -1).
+  WiFiClientSecure client;
   HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(60000);
-  http.begin(client, url);
-  http.addHeader("User-Agent", "ATS-Mini-Recovery/2");
-
-  int code = http.GET();
-  if (code != 200) {
+  int  code = 0;
+  bool started = false;
+  for (int attempt = 1; attempt <= 3 && !started; attempt++) {
+    if (attempt > 1) {
+      char m[24]; snprintf(m, sizeof(m), "Retry %d/3...", attempt);
+      drawOtaError(m);
+      delay(700);
+    }
+    client.setInsecure();
+    client.setHandshakeTimeout(20);     // seconds — TLS handshake headroom
+    http.setReuse(false);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(30000);
+    if (!http.begin(client, url)) { continue; }
+    http.addHeader("User-Agent", "ATS-Mini-Recovery/2");
+    code = http.GET();
+    if (code == 200) { started = true; break; }
     http.end();
-    tft.setTextColor(D_RED, D_BG); tft.setTextFont(1);
-    tft.setTextDatum(MC_DATUM);
-    char err[32]; snprintf(err, sizeof(err), "HTTP %d", code);
-    tft.drawString(err, W / 2, BODY_Y + 90);
+  }
+  if (!started) {
+    char err[28]; snprintf(err, sizeof(err), "Failed: HTTP %d", code);
+    drawOtaError(err);
+    Serial.printf("{\"ota\":\"error\",\"http\":%d}\n", code);
     delay(3000);
     return false;
   }
 
   int total = http.getSize();
-  if (!otaBegin(total > 0 ? (size_t)total : OTA_WITH_SEQUENTIAL_WRITES)) {
-    http.end(); return false;
-  }
-  otaTotal = (size_t)(total > 0 ? total : 0);
+  if (total <= 0) { drawOtaError("No content-length"); http.end(); delay(3000); return false; }
+  if (!otaBegin((size_t)total)) { drawOtaError("OTA begin failed"); http.end(); delay(3000); return false; }
+  otaTotal = (size_t)total;
 
   static uint8_t dlBuf[4096];
   WiFiClient* stream = http.getStreamPtr();
-  uint32_t lastDraw = 0;
+  uint32_t lastDraw = 0, lastData = millis();
+  uint32_t spkBase = 0; uint32_t spkTime = millis(); uint32_t kbps = 0;
 
-  while (http.connected()) {
+  // Drive by byte count, not http.connected() — the connection can drop after
+  // the final bytes are buffered (the old loop stalled near 99%).
+  while (otaWritten < otaTotal) {
     size_t av = stream->available();
-    if (!av) { delay(1); continue; }
-    int n = stream->readBytes(dlBuf, min(av, sizeof(dlBuf)));
-    if (n <= 0) break;
-    if (!otaWrite(dlBuf, (size_t)n)) { http.end(); return false; }
-    if (millis() - lastDraw > 150) {
-      lastDraw = millis();
-      drawOtaProgress();
+    if (av) {
+      int n = stream->readBytes(dlBuf, min(av, min(sizeof(dlBuf), otaTotal - otaWritten)));
+      if (n > 0) {
+        if (!otaWrite(dlBuf, (size_t)n)) { drawOtaError("Flash write error"); http.end(); delay(3000); return false; }
+        lastData = millis();
+      }
+    } else {
+      // No data right now — bail only if the socket is closed AND drained.
+      if (!http.connected() && stream->available() == 0) break;
+      if (millis() - lastData > 20000) { drawOtaError("Stalled - timeout"); http.end(); delay(3000); return false; }
+      delay(1);
     }
+    uint32_t now = millis();
+    if (now - spkTime >= 500) {                       // sample speed every 0.5s
+      kbps = ((otaWritten - spkBase) / 1024) * 1000 / (now - spkTime);
+      spkBase = otaWritten; spkTime = now;
+    }
+    if (now - lastDraw > 200) { lastDraw = now; drawOtaUpdate(kbps); }
   }
   http.end();
+  drawOtaUpdate(kbps);
 
-  if (otaWritten == 0) return false;
-  bool ok = otaFinish();
-  if (ok) {
-    tft.setTextColor(D_GREEN, D_BG); tft.setTextFont(2);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("Done! Rebooting...", W / 2, BODY_Y + 90);
-    Serial.println("{\"ota\":\"complete\",\"ok\":true}");
-    delay(2000); esp_restart();
+  if (otaWritten < otaTotal) {
+    char e[32]; snprintf(e, sizeof(e), "Incomplete %u/%uKB",
+      (unsigned)(otaWritten / 1024), (unsigned)(otaTotal / 1024));
+    drawOtaError(e);
+    Serial.printf("{\"ota\":\"incomplete\",\"got\":%u,\"need\":%u}\n",
+      (unsigned)otaWritten, (unsigned)otaTotal);
+    delay(3500);
+    return false;
   }
+
+  if (otaFinish()) {
+    tft.setTextColor(D_GREEN, D_BG); tft.setTextFont(2); tft.setTextDatum(MC_DATUM);
+    tft.drawString("Done! Rebooting...", W / 2, otaBarY + 70);
+    Serial.println("{\"ota\":\"complete\",\"ok\":true}");
+    delay(1800); esp_restart();
+  }
+  drawOtaError("Verify failed");
+  delay(3000);
   return false;
 }
 
@@ -1017,9 +1182,9 @@ static void webHandleRoot() { server.send(200, "text/html", HTML_MAIN); }
 
 static void webHandleStatus() {
   String ip = wifiOK ? WiFi.localIP().toString() :
-              apMode ? WiFi.softAPIP().toString() : "0.0.0.0";
+              adhocOn ? WiFi.softAPIP().toString() : "0.0.0.0";
   String ssid = wifiOK ? WiFi.SSID() : "";
-  String wifi = wifiOK ? "ok" : apMode ? "ap" : "none";
+  String wifi = wifiOK ? "ok" : adhocOn ? "ap" : "none";
   String json = "{\"wifi\":\"" + wifi + "\",\"ssid\":\"" + ssid +
                 "\",\"ip\":\"" + ip + "\"}";
   server.send(200, "application/json", json);
@@ -1119,8 +1284,9 @@ static void handleSerialCmd(const char* line) {
     otaAbortAll(); sst = SS_IDLE; Serial.println("{\"ok\":true}");
   } else if (!strncmp(v, "status", 6)) {
     Serial.printf("{\"mode\":\"recovery\",\"wifi\":\"%s\",\"ip\":\"%s\"}\n",
-      wifiOK ? "connected" : apMode ? "ap" : "none",
-      wifiOK ? WiFi.localIP().toString().c_str() : WiFi.softAPIP().toString().c_str());
+      wifiOK ? "connected" : adhocOn ? "ap" : "none",
+      wifiOK ? WiFi.localIP().toString().c_str()
+             : adhocOn ? WiFi.softAPIP().toString().c_str() : "0.0.0.0");
   } else if (!strncmp(v, "reboot", 6)) {
     Serial.println("{\"ok\":true}"); delay(300); esp_restart();
   }
@@ -1184,32 +1350,13 @@ static void startScan() {
   needFull();
 }
 
-// Wait (up to ms) for STA to come up before an internet action, showing a note.
-static void waitForWifi(uint32_t ms) {
-  if (wifiOK) return;
-  tft.fillScreen(D_BG);
-  drawHeader("OTA Update");
-  tft.setTextColor(D_CYAN, D_BG);
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("Connecting to WiFi...", W / 2, BODY_Y + BODY_H / 2);
-  uint32_t t = millis();
-  int spin = 0;
-  while (!wifiOK && millis() - t < ms) {
-    netTick();
-    static const char spins[] = "|/-\\";
-    char sp[3] = { spins[spin++ % 4], 0 };
-    tft.setTextColor(D_PURPLE, D_BG);
-    tft.setTextFont(4);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString(sp, W / 2, BODY_Y + BODY_H / 2 + 28);
-    delay(150);
-  }
-}
 
 static void processInput() {
   int enc = encPop();
   int btn = btnEvent();
+
+  // Global 2-second long press → escape to main menu from any screen
+  if (btn == 3) { goTo(SCR_MAIN, 0); return; }
 
   // WiFi scan poll (background) — dedupe SSIDs (mesh networks repeat)
   if (scanning && cur == SCR_WIFI_SCAN) {
@@ -1263,19 +1410,31 @@ static void processInput() {
 
     // ── Network menu ──────────────────────────────────────────────────────────
     case SCR_NETWORK:
-      if (enc) { sel = (sel + enc + 4) % 4; dirty = true; }
+      if (enc) { sel = (sel + enc + 5) % 5; dirty = true; }
       if (btn == 1) {
         switch (sel) {
           case 0: goTo(SCR_WIFI_SCAN); startScan(); break;
-          case 1:
-            waitForWifi(9000);
+          case 1: {
+            if (!wifiOK) {
+              showToast("Need WiFi (not adhoc) for OTA", 4000);
+              break;
+            }
+            // Show checking message, then verify internet
+            showToast("Checking internet...", 3000);
+            redraw();
+            if (!hasInternet()) {
+              showToast("No internet - check router/DNS", 5000);
+              break;
+            }
             goTo(SCR_OTA_LIST);
             redraw();
             fetchReleases(25);
             needFull();
             break;
-          case 2: goTo(SCR_WEBSERVER); break;
-          case 3: goTo(SCR_MAIN); break;
+          }
+          case 2: if (adhocOn) stopAdhoc(); else startAdhoc(); needFull(); break;
+          case 3: goTo(SCR_WEBSERVER); break;
+          case 4: goTo(SCR_MAIN); break;
         }
       }
       if (btn == 2) goTo(SCR_MAIN);
@@ -1302,17 +1461,11 @@ static void processInput() {
 
     // ── WiFi password keyboard ────────────────────────────────────────────────
     case SCR_WIFI_KB:
-      if (enc) {
-        kbCol = (kbCol + enc + kbRowLen(kbRow)) % kbRowLen(kbRow);
-        dirty = true;
-      }
-      if (btn == 2) { // long press = next row
-        kbRow = (kbRow + 1) % 4;
-        kbCol = min(kbCol, kbRowLen(kbRow) - 1);
-        dirty = true;
-      }
+      // Encoder walks the whole keyboard linearly (wraps across rows).
+      if (enc) { kbStep(enc); dirty = true; }
       if (btn == 1) {
         char c = kbChar(kbRow, kbCol);
+        bool layoutChanged = false;
         switch ((uint8_t)c) {
           case 0x7f:
             if (kbPass.length() > 0) kbPass.remove(kbPass.length() - 1);
@@ -1345,17 +1498,19 @@ static void processInput() {
           case '\x01':
             if (kbNums) { kbNums = false; kbShift = false; }
             else kbShift = !kbShift;
+            layoutChanged = true;     // all letter cases change
             break;
           case '\x02':
             kbNums = !kbNums; kbShift = false;
             kbCol = min(kbCol, kbRowLen(kbRow) - 1);
+            layoutChanged = true;     // whole layout changes
             break;
           default:
             if (kbPass.length() < 63) kbPass += c;
-            kbShift = false;
+            if (kbShift) { kbShift = false; layoutChanged = true; } // case flips back
             break;
         }
-        dirty = true;
+        if (layoutChanged) needFull(); else dirty = true;
       }
       break;
 

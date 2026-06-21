@@ -338,15 +338,15 @@ jobs:
         run: |
           REPO="${GITHUB_REPOSITORY}"
 
-          # Look up latest iOS release
-          IOS_RELEASE=$(gh api "repos/${REPO}/releases?per_page=20" \
+          # Look up latest iOS release (per_page=100 to reach ios-v* past many firmware releases)
+          IOS_RELEASE=$(gh api "repos/${REPO}/releases?per_page=100" \
             --jq '[.[] | select(.tag_name | startswith("ios-v"))] | first' 2>/dev/null || echo "null")
           IOS_TAG=$(echo "$IOS_RELEASE" | jq -r '.tag_name // empty' 2>/dev/null || true)
           IOS_URL=$(echo "$IOS_RELEASE" | jq -r \
             '.assets[]? | select(.name == "ATSMini.ipa") | .browser_download_url' 2>/dev/null || true)
 
           # Look up latest Android release
-          ANDROID_RELEASE=$(gh api "repos/${REPO}/releases?per_page=20" \
+          ANDROID_RELEASE=$(gh api "repos/${REPO}/releases?per_page=100" \
             --jq '[.[] | select(.tag_name | startswith("android-v"))] | first' 2>/dev/null || echo "null")
           ANDROID_TAG=$(echo "$ANDROID_RELEASE" | jq -r '.tag_name // empty' 2>/dev/null || true)
           ANDROID_URL=$(echo "$ANDROID_RELEASE" | jq -r \

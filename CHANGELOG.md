@@ -4,6 +4,41 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.61 (2026-06-21)
+
+### Fixed
+
+- **Recovery menu — footer/menu overlap eliminated.** Reduced row height from 27 to 24 px so
+  five-item menus (Network now has WiFi Scan / OTA / Adhoc / Web Server / Back) fit cleanly
+  above the footer without overlap.
+- **Keyboard navigation — all rows now reachable.** Encoder now walks every key linearly across
+  all four rows (wraps at end of each row into the next). Removed the long-press-for-next-row
+  behaviour which conflicted with the global 2-second escape.
+- **Keyboard partial redraw — no flicker.** Only the two changed key highlights are repainted on
+  each encoder step. Shift/Num layout changes force a full redraw.
+- **OTA download stall at 99% fixed.** The download loop was driven by `http.connected()`, which
+  drops as soon as the CDN finishes sending but before the local buffer is drained. Now driven
+  by byte count (`while otaWritten < total`), draining the stream completely before checking.
+- **HTTP -1 / TLS flake on GitHub CDN.** Both release-list fetch and firmware download now retry
+  up to 3× with a 20-second TLS handshake timeout and `setReuse(false)`.
+- **OTA progress screen flicker.** `drawOtaProgress()` was clearing the entire body region every
+  200 ms. Replaced with a frame-drawn-once model: bar frame is painted once, only the filled
+  portion and text lines update each tick.
+- **WiFi speed improved.** Added `WiFi.setSleep(false)` (disables modem sleep, which caused
+  ~100 ms latency spikes per packet) and set TX power to maximum.
+
+### Changed
+
+- **Recovery entry — press, not hold.** Encoder button press (not sustained hold) during the
+  splash countdown now enters the recovery menu. Splash text updated to reflect this.
+- **WiFi off by default on recovery entry.** No AP is started on boot. STA connection to known
+  networks proceeds asynchronously with toast-in-footer status. User starts adhoc from Network
+  menu when needed for local flashing.
+- **OTA progress shows KB/s and ETA.** Download screen now displays live transfer speed and
+  estimated time remaining alongside percent and bytes done/total.
+- **Release notes now include iOS and Android links.** `build.yml` bumped iOS/Android release
+  lookup from `per_page=20` to `per_page=100` so links appear even when there are many releases.
+
 ## 2.60 (2026-06-21)
 
 ### Changed
