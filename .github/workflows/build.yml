@@ -439,7 +439,7 @@ jobs:
           gh release create "${TAG}" \
             --repo "${{ github.repository }}" \
             --title "${TAG}" \
-            --make-latest=true \
+            --latest \
             --notes-file fw-release-notes.md \
             release/*-ospi-ota.bin \
             release/*-ospi-flash.bin \
