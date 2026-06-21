@@ -25,7 +25,7 @@ int getBatteryPercentage()
   float v = batteryVolts;
   if (v >= 4.20) return 100;
   if (v <= 3.20) return 0;
-  
+
   float pct = 0;
   if (v >= BATT_SOC_LEVEL3)
   {
@@ -43,7 +43,7 @@ int getBatteryPercentage()
   {
     pct = (v - 3.20) * (25.0 / (BATT_SOC_LEVEL1 - 3.20));
   }
-  
+
   int ipct = (int)pct;
   if (ipct < 0) ipct = 0;
   if (ipct > 100) ipct = 100;
@@ -141,7 +141,7 @@ bool drawBattery(int x, int y)
     int pct = getBatteryPercentage();
     int level = (pct * 24) / 100;
     if (level < 2 && pct > 0) level = 2; // draw at least 2 pixels if not completely dead
-    
+
     uint16_t color;
     if (pct > 50)
       color = TH.batt_full;
@@ -161,7 +161,7 @@ bool drawBattery(int x, int y)
       {
         textColor = 0x0000; // Black for high contrast on filled color
       }
-      
+
       spr.setTextFont(1);
       spr.setTextColor(textColor);
       spr.setTextDatum(MC_DATUM);
@@ -174,10 +174,10 @@ bool drawBattery(int x, int y)
       {
         sprintf(buf, "%d", pct);
       }
-      
+
       spr.drawString(buf, x + 14, y + 8, 1);
     }
-    
+
     return false; // Always return false so the wifi indicator is drawn in the compact position
   }
 }

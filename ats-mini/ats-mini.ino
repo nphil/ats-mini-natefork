@@ -990,7 +990,7 @@ void loop()
       else if(currentCmd != CMD_NONE)
       {
         // Deactivate modal mode
-        if (currentCmd == CMD_WIFI_NETWORKS || currentCmd == CMD_WIFI_KEYBOARD || 
+        if (currentCmd == CMD_WIFI_NETWORKS || currentCmd == CMD_WIFI_KEYBOARD ||
             currentCmd == CMD_WIFIMODE || currentCmd == CMD_WIFI_STATE ||
             currentCmd == CMD_WIFI_CONNECTING || currentCmd == CMD_WIFI_CONNECT_FAILED)
         {

@@ -419,7 +419,7 @@ void wifiScanTick()
       {
         String ssid = WiFi.SSID(i);
         if (ssid.length() == 0) continue; // Skip hidden/empty SSIDs
-        
+
         // Check if SSID already exists in discoveredNets
         int foundIdx = -1;
         for (int j = 0; j < discoveredCount; j++)
@@ -430,10 +430,10 @@ void wifiScanTick()
             break;
           }
         }
-        
+
         int32_t rssi = WiFi.RSSI(i);
         bool isSecure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
-        
+
         if (foundIdx != -1)
         {
           // Duplicate SSID: keep the one with stronger signal
@@ -1297,7 +1297,7 @@ bool clickHandler(uint16_t cmd, bool shortPress)
       {
         if (keyboardIndex < 65)
         {
-          const char keyboardChars[] = 
+          const char keyboardChars[] =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             "abcdefghijklmnopqrstuvwxyz"
             "0123456789-_.";

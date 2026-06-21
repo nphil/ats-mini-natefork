@@ -155,9 +155,17 @@ jobs:
 
       - name: Prepare compiled artifact
         run: |
-          mkdir -p artifact/ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}
-          mv ats-mini/build/esp32.esp32.esp32s3/*.ino.bin ats-mini/build/esp32.esp32.esp32s3/*.ino.*.bin artifact/ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}/
-          cp CHANGELOG.md artifact/ats-mini-${{ steps.slug.outputs.slug }}-${{ matrix.board.artifact-suffix }}/
+          SLUG="${{ steps.slug.outputs.slug }}"
+          SUFFIX="${{ matrix.board.artifact-suffix }}"
+          ARTIFACT_DIR="artifact/ats-mini-${SLUG}-${SUFFIX}"
+          mkdir -p "${ARTIFACT_DIR}"
+          mv ats-mini/build/esp32.esp32.esp32s3/*.ino.bin \
+             ats-mini/build/esp32.esp32.esp32s3/*.ino.*.bin \
+             "${ARTIFACT_DIR}/"
+          cp CHANGELOG.md "${ARTIFACT_DIR}/"
+          RECOVERY=$(find ats-mini-recovery/build -name "*.ino.bin" \
+            ! -name "*.bootloader.bin" ! -name "*.partitions.bin" | head -1)
+          cp "${RECOVERY}" "${ARTIFACT_DIR}/ats-mini-${SLUG}-${SUFFIX}-recovery.bin"
 
       - name: Cache pip packages
         uses: actions/cache@v4
@@ -266,127 +274,6 @@ jobs:
         run: |
           gh release upload "$SLUG" ./*-ospi-flash.bin ./*-ospi-full.bin ./*-ospi-ota.bin --repo '${{ github.repository }}' --clobber
 
-  latest-release:
-    # Overwrites the rolling "latest" release on every push to main so the
-    # Releases page always has a ready-to-flash binary without tagging.
-    # continue-on-error: tag protection rules may block creating the 'latest'
-    # tag on some repo configurations; versioned releases are the real deliverable.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    continue-on-error: true
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: 'ats-mini-*'
-          merge-multiple: true
-          path: artifact
-
-      - name: Collect release binaries
-        run: |
-          find artifact -name '*-ospi-flash.bin' -exec cp {} . \;
-          find artifact -name '*-ospi-full.bin'  -exec cp {} . \;
-          find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
-            -exec cp {} "ats-mini-${{ needs.build.outputs.slug }}-ospi-ota.bin" \;
-
-      - name: Write release notes
-        run: |
-          SLUG="${{ needs.build.outputs.slug }}"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
-          BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M UTC')"
-
-          # Extract the latest section from CHANGELOG.md (between first two ## headings)
-          CHANGELOG_SECTION="$(python3 - << 'PYEOF'
-          import re, sys
-          try:
-              t = open('CHANGELOG.md').read()
-              m = re.search(r'(^## .+?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
-              print(m.group(0).strip() if m else '')
-          except Exception as e:
-              print('')
-          PYEOF
-          )"
-
-          # Recent commits since last tag (capped at 20)
-          LAST_TAG="$(git describe --tags --match 'v?.??' --abbrev=0 2>/dev/null || true)"
-          if [ -n "$LAST_TAG" ]; then
-            COMMITS="$(git log --oneline "${LAST_TAG}..HEAD" --no-merges | head -20)"
-          else
-            COMMITS="$(git log --oneline -20 --no-merges)"
-          fi
-
-          cat > release-notes.md << EOF
-          > **Auto-updated on every push to \`main\`.**
-          > Built from commit \`${SHORT_SHA}\` — ${BUILD_DATE}
-
-          ## ⬇️ Flash
-
-          Download \`ats-mini-${SLUG}-ospi-flash.bin\` and flash with:
-
-          \`\`\`
-          esptool.py --chip esp32s3 write_flash 0x0 ats-mini-${SLUG}-ospi-flash.bin
-          \`\`\`
-
-          ## What's changed
-          EOF
-
-          if [ -n "$CHANGELOG_SECTION" ]; then
-            echo "$CHANGELOG_SECTION" >> release-notes.md
-          elif [ -n "$COMMITS" ]; then
-            { echo ""; echo '```'; echo "$COMMITS"; echo '```'; } >> release-notes.md
-          else
-            echo "_No changelog available._" >> release-notes.md
-          fi
-
-      - name: Update latest release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          REPO='${{ github.repository }}'
-          TITLE="Latest Build (${{ needs.build.outputs.slug }})"
-
-          # Check if 'latest' release already exists.
-          # gh api outputs the raw JSON body to stdout even on 4xx errors, so
-          # using --jq '.id' on a 404 response sets RELEASE_ID to the full JSON
-          # blob rather than empty string.  Guard by only extracting .id when
-          # the API call actually succeeds (exit 0).
-          RELEASE_ID=""
-          if RELEASE_JSON=$(gh api "repos/${REPO}/releases/tags/latest" 2>/dev/null); then
-            RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id')
-          fi
-
-          if [ -n "$RELEASE_ID" ]; then
-            # Delete old assets (filenames change with each slug so they accumulate)
-            gh api "repos/${REPO}/releases/${RELEASE_ID}/assets" --jq '.[].id' \
-              | xargs -r -I{} gh api -X DELETE "repos/${REPO}/releases/assets/{}"
-
-            # Patch metadata in-place — no tag delete/recreate, bypasses ruleset restrictions
-            gh api -X PATCH "repos/${REPO}/releases/${RELEASE_ID}" \
-              -f name="${TITLE}" \
-              -f body="$(cat release-notes.md)" \
-              -F prerelease=true \
-              --silent
-          else
-            # First run: create the release (also creates the 'latest' tag)
-            gh release create latest \
-              --repo "${REPO}" \
-              --prerelease \
-              --title "${TITLE}" \
-              --notes-file release-notes.md
-          fi
-
-          # Upload new assets (--clobber handles any same-name leftovers)
-          gh release upload latest --repo "${REPO}" --clobber ./*-ospi-flash.bin ./*-ospi-full.bin ./*-ospi-ota.bin
-
   firmware-auto-release:
     # Auto-bumps VER_APP and publishes a versioned firmware release on every
     # push to main. Mirrors how ios.yml auto-releases ios-vX.Y.Z on each push.
@@ -431,31 +318,97 @@ jobs:
       - name: Collect release binaries with clean version names
         run: |
           mkdir -p release
-          # Merged binary for esptool (flash at 0x0)
+          # Merged binary (flash at 0x0, preserves LittleFS / user settings)
           find artifact -name '*-ospi-flash.bin' -exec \
             cp {} "release/ats-mini-${TAG}-ospi-flash.bin" \;
-          # Full 8MB binary — overwrites every flash byte (use when device is in unknown state)
+          # Full 8 MB image — every byte overwritten (use for bricked devices)
           find artifact -name '*-ospi-full.bin' -exec \
             cp {} "release/ats-mini-${TAG}-ospi-full.bin" \;
           # Raw app binary for web OTA upload
-          find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' -exec \
+          find artifact -name '*.ino.bin' ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
+            ! -name '*-recovery.bin' -exec \
             cp {} "release/ats-mini-${TAG}-ospi-ota.bin" \;
+          # Recovery binary: flash to factory partition (0x10000) for emergency restore
+          find artifact -name '*-ospi-recovery.bin' -exec \
+            cp {} "release/ats-mini-${TAG}-ospi-recovery.bin" \;
 
-      - name: Extract changelog section
+      - name: Generate release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          REPO="${GITHUB_REPOSITORY}"
+
+          # Look up latest iOS release
+          IOS_RELEASE=$(gh api "repos/${REPO}/releases?per_page=20" \
+            --jq '[.[] | select(.tag_name | startswith("ios-v"))] | first' 2>/dev/null || echo "null")
+          IOS_TAG=$(echo "$IOS_RELEASE" | jq -r '.tag_name // empty' 2>/dev/null || true)
+          IOS_URL=$(echo "$IOS_RELEASE" | jq -r \
+            '.assets[]? | select(.name == "ATSMini.ipa") | .browser_download_url' 2>/dev/null || true)
+
+          # Look up latest Android release
+          ANDROID_RELEASE=$(gh api "repos/${REPO}/releases?per_page=20" \
+            --jq '[.[] | select(.tag_name | startswith("android-v"))] | first' 2>/dev/null || echo "null")
+          ANDROID_TAG=$(echo "$ANDROID_RELEASE" | jq -r '.tag_name // empty' 2>/dev/null || true)
+          ANDROID_URL=$(echo "$ANDROID_RELEASE" | jq -r \
+            '.assets[]? | select(.name | endswith(".apk")) | .browser_download_url' 2>/dev/null || true)
+
+          # Build link cells (fall back to em-dash when not found)
+          if [ -n "$IOS_URL" ]; then
+            export IOS_CELL="[ATSMini.ipa \`${IOS_TAG}\`](${IOS_URL})"
+          else
+            export IOS_CELL="— _(not yet built)_"
+          fi
+          if [ -n "$ANDROID_URL" ]; then
+            APKNAME=$(basename "$ANDROID_URL")
+            export ANDROID_CELL="[\`${APKNAME}\` \`${ANDROID_TAG}\`](${ANDROID_URL})"
+          else
+            export ANDROID_CELL="— _(not yet built)_"
+          fi
+
           python3 - << 'PYEOF' > fw-release-notes.md
           import os, re
-          ver = os.environ['VERSION'].replace('.', r'\.')
+          tag     = os.environ['TAG']
+          version = os.environ['VERSION']
+          repo    = os.environ['GITHUB_REPOSITORY']
+          ios     = os.environ['IOS_CELL']
+          android = os.environ['ANDROID_CELL']
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+          changelog = ""
           try:
               t = open('CHANGELOG.md').read()
-              m = re.search(r'(^## ' + ver + r' .*?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
+              m = re.search(r'(^## ' + re.escape(version) + r' .*?)(?=^## |\Z)', t, re.MULTILINE | re.DOTALL)
               if m:
-                  print(m.group(0).strip())
-              else:
-                  print(f"Firmware release {os.environ['TAG']}.\n\n"
-                        f"_Auto-built from commit_ `{os.environ.get('GITHUB_SHA', '')[:7]}`")
-          except Exception as e:
-              print(f"Firmware release {os.environ['TAG']}.")
+                  changelog = m.group(0).strip()
+          except Exception:
+              pass
+          out = [
+              "## Downloads\n",
+              "| Asset | Description |",
+              "|---|---|",
+              f"| [ats-mini-{tag}-ospi-ota.bin]({base}/ats-mini-{tag}-ospi-ota.bin) | Web OTA — upload via browser |",
+              f"| [ats-mini-{tag}-ospi-flash.bin]({base}/ats-mini-{tag}-ospi-flash.bin) | esptool install (preserves settings) |",
+              f"| [ats-mini-{tag}-ospi-full.bin]({base}/ats-mini-{tag}-ospi-full.bin) | Complete 8 MB image (erases everything) |",
+              f"| [ats-mini-{tag}-ospi-recovery.bin]({base}/ats-mini-{tag}-ospi-recovery.bin) | Recovery — flash to 0x10000 in bootloader mode |",
+              f"| {ios} | iOS companion app |",
+              f"| {android} | Android companion app |",
+              "",
+              "<details>",
+              "<summary>esptool flash commands</summary>",
+              "",
+              "```bash",
+              "# Standard install (preserves LittleFS / settings):",
+              f"esptool.py --chip esp32s3 write_flash --flash_mode dio --flash_freq 40m 0x0 ats-mini-{tag}-ospi-flash.bin",
+              "",
+              "# Emergency recovery (bootloader mode only):",
+              f"esptool.py --chip esp32s3 write_flash --flash_mode dio --flash_freq 40m 0x10000 ats-mini-{tag}-ospi-recovery.bin",
+              "```",
+              "</details>",
+          ]
+          if changelog:
+              out += ["", changelog]
+          else:
+              out += [f"\n_Firmware release {tag} — auto-built._"]
+          print('\n'.join(out))
           PYEOF
 
       - name: Commit version bump, tag, and publish release
@@ -486,24 +439,9 @@ jobs:
           gh release create "${TAG}" \
             --repo "${{ github.repository }}" \
             --title "${TAG}" \
+            --make-latest=true \
             --notes-file fw-release-notes.md \
+            release/*-ospi-ota.bin \
             release/*-ospi-flash.bin \
             release/*-ospi-full.bin \
-            release/*-ospi-ota.bin
-
-      - name: Attach latest iOS IPA to this firmware release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          REPO='${{ github.repository }}'
-          IOS_IPA_URL=$(gh api "repos/${REPO}/releases?per_page=20" \
-            --jq '[.[] | select(.tag_name | startswith("ios-v"))] | first | .assets[] | select(.name == "ATSMini.ipa") | .browser_download_url' \
-            2>/dev/null || true)
-          if [ -n "$IOS_IPA_URL" ] && [ "$IOS_IPA_URL" != "null" ]; then
-            echo "Downloading IPA from: $IOS_IPA_URL"
-            curl -fsSL -o ATSMini.ipa "$IOS_IPA_URL"
-            gh release upload "${TAG}" ATSMini.ipa --repo "${REPO}" --clobber
-            echo "IPA attached to ${TAG}"
-          else
-            echo "No iOS IPA found — skipping"
-          fi
+            release/*-ospi-recovery.bin

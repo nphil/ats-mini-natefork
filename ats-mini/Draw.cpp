@@ -100,7 +100,7 @@ void drawWiFiIndicator(int x, int y)
       } else if (cachedWiFiRSSI >= -80 && cachedWiFiRSSI < 0) {
         numArcs = 2;
       }
-      
+
       innerColor = TH.rf_icon_conn;
       middleColor = (numArcs >= 2) ? TH.rf_icon_conn : TH.bg;
       outerColor = (numArcs >= 3) ? TH.rf_icon_conn : TH.bg;
@@ -562,7 +562,7 @@ void drawWifiNetworksScreen()
   spr.setTextDatum(TL_DATUM);
   spr.setTextColor(TH.menu_hdr, TH.menu_bg);
   spr.drawString("Select Wi-Fi Network", 10, 8, 4);
-  
+
   spr.drawLine(10, 32, 310, 32, TH.menu_border);
 
   if (wifiScanning && discoveredCount == 0)
@@ -578,7 +578,7 @@ void drawWifiNetworksScreen()
   {
     startIdx = wifiNetIdx - 4;
   }
-  
+
   int displayCount = discoveredCount - startIdx;
   if (displayCount > 5) displayCount = 5;
 
@@ -664,10 +664,10 @@ void drawWifiKeyboardScreen()
 
   spr.setTextColor(TH.menu_item);
   spr.drawString("SSID: " + selectedSSID, 10, 32, 2);
-  
+
   spr.drawRect(10, 48, 300, 22, TH.box_border);
   spr.fillRect(11, 49, 298, 20, TH.box_bg);
-  
+
   spr.setTextDatum(ML_DATUM);
   spr.setTextColor(TH.box_text);
   String displayPass = wifiPassword + "_";
@@ -679,7 +679,7 @@ void drawWifiKeyboardScreen()
   int startX = 4;
   int startY = 72;
 
-  const char keyboardChars[] = 
+  const char keyboardChars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "abcdefghijklmnopqrstuvwxyz"
     "0123456789-_.";
@@ -747,18 +747,18 @@ void drawWifiConnectingScreen()
   spr.setTextDatum(TL_DATUM);
   spr.setTextColor(TH.menu_hdr, TH.menu_bg);
   spr.drawString("Wi-Fi Connection", 10, 8, 4);
-  
+
   spr.drawLine(10, 32, 310, 32, TH.menu_border);
 
   spr.setTextDatum(MC_DATUM);
-  
+
   if (wifiConnectStatus == 1) // Connecting
   {
     spr.setTextColor(TH.menu_item);
     spr.drawString("Connecting to:", 160, 60, 4);
     spr.setTextColor(TH.menu_param);
     spr.drawString(connectingSSID, 160, 95, 4);
-    
+
     // Draw simple animated indicator or progress dot
     static int dotCount = 0;
     static uint32_t lastDotUpdate = 0;
@@ -795,7 +795,7 @@ void drawWifiStatusScreen()
   spr.setTextDatum(TL_DATUM);
   spr.setTextColor(TH.menu_hdr, TH.menu_bg);
   spr.drawString("Wi-Fi Status", 10, 8, 4);
-  
+
   spr.drawLine(10, 32, 310, 32, TH.menu_border);
 
   spr.setTextColor(TH.menu_item);
@@ -804,7 +804,7 @@ void drawWifiStatusScreen()
   wl_status_t status = WiFi.status();
   String connState = "Disconnected";
   uint16_t stateColor = TH.menu_param;
-  
+
   if (status == WL_CONNECTED)
   {
     connState = internetConnected ? "Connected (Internet OK)" : "Connected (No Internet)";
@@ -833,7 +833,7 @@ void drawWifiStatusScreen()
   spr.drawString("State:", 15, 45, 2);
   spr.setTextColor(stateColor);
   spr.drawString(connState, 110, 45, 2);
-  
+
   spr.setTextColor(TH.menu_item);
   spr.drawString("Network:", 15, 70, 2);
   spr.setTextColor(TH.menu_param);
