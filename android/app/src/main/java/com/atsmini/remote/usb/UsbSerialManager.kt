@@ -124,4 +124,46 @@ class UsbSerialManager(private val context: Context) {
         runCatching { p.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE) }
         startReader(p)
     }
+
+    /**
+     * Close the USB port silently so the device can reset without Android
+     * treating it as a full disconnect (transport stays attached until caller
+     * decides). Used before triggering a firmware reboot for flashing.
+     */
+    fun closeForReset() {
+        ioManager?.stop(); ioManager = null
+        runCatching { port?.close() }; port = null
+    }
+
+    /**
+     * Poll until the USB device reappears after a device reset (re-enumeration
+     * takes ~1–2 s) and return an open port ready for flashing.  Returns null
+     * if the device doesn't reappear within [timeoutMs] or permission is gone.
+     *
+     * Permission is typically retained across the reset if granted in the same
+     * Android session (same VID/PID).  If lost, the user will see a permission
+     * dialog; they should grant it and tap Flash again.
+     */
+    fun waitAndReopenForFlashing(timeoutMs: Long = 8000L): UsbSerialPort? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val driver = UsbSerialProber.getDefaultProber()
+                .findAllDrivers(usbManager).firstOrNull()
+            if (driver != null && usbManager.hasPermission(driver.device)) {
+                val conn = runCatching { usbManager.openDevice(driver.device) }.getOrNull()
+                if (conn != null) {
+                    val p = driver.ports.first()
+                    val opened = runCatching {
+                        p.open(conn)
+                        p.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                        port = p
+                        p
+                    }.getOrElse { runCatching { p.close() }; null }
+                    if (opened != null) return opened
+                }
+            }
+            Thread.sleep(300)
+        }
+        return null
+    }
 }

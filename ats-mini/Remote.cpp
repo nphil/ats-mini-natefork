@@ -5,6 +5,7 @@
 #include "Draw.h"
 #include "Remote.h"
 #include "Storage.h"
+#include "soc/rtc_cntl_reg.h"
 
 static void bleScanProgress(uint8_t pct)
 {
@@ -577,6 +578,16 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
   {
     remoteJsonOptions(stream);
     return REMOTE_CHANGED;
+  }
+
+  // ---- Reboot into ROM download mode (USB flashing without BOOT button) -
+  if(!strcmp(cmd, "reboot_dl"))
+  {
+    // Set RTC flag so the bootloader enters ROM download mode on next boot
+    // regardless of GPIO0 state. Works from any firmware mode.
+    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+    esp_restart();
+    return REMOTE_NONE; // unreachable
   }
 
   // ---- Subscribe: periodic JSON status --------------------------------

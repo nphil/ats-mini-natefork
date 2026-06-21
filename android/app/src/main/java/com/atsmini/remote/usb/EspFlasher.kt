@@ -42,17 +42,22 @@ class EspFlasher(private val port: UsbSerialPort) {
     // SPI_SET_PARAMS or it writes with default params and the image bootloops.
     private val FLASH_SIZE_BYTES = 8 * 1024 * 1024
 
-    /** Flash a single [image] at [offset]. Convenience wrapper around [flashParts]. */
-    fun flash(offset: Int, image: ByteArray, progress: Progress): Boolean =
-        flashParts(listOf(offset to image), progress)
+    /**
+     * Flash a single [image] at [offset].
+     * If [skipAutoReset] is true, skips the DTR/RTS reset sequence and only attempts
+     * direct ROM sync — use this when the caller has already triggered reset externally.
+     */
+    fun flash(offset: Int, image: ByteArray, progress: Progress, skipAutoReset: Boolean = false): Boolean =
+        flashParts(listOf(offset to image), progress, skipAutoReset)
 
     /** Flash multiple partitions in a single session.
      *
      *  [parts] is a list of (flashOffset, imageBytes) pairs. Parts are sorted by
      *  offset before writing so callers can pass them in any order.
+     *  [skipAutoReset] — when true, does not send the DTR/RTS reset sequence.
      */
-    fun flashParts(parts: List<Pair<Int, ByteArray>>, progress: Progress): Boolean {
-        if (!syncAndAttach(progress)) return false
+    fun flashParts(parts: List<Pair<Int, ByteArray>>, progress: Progress, skipAutoReset: Boolean = false): Boolean {
+        if (!syncAndAttach(progress, skipAutoReset)) return false
 
         val sorted = parts.sortedBy { it.first }
         val totalBytes = sorted.sumOf { it.second.size }
@@ -81,21 +86,25 @@ class EspFlasher(private val port: UsbSerialPort) {
 
     // --- Sync + SPI attach ------------------------------------------------------
 
-    private fun syncAndAttach(progress: Progress): Boolean {
+    private fun syncAndAttach(progress: Progress, skipAutoReset: Boolean = false): Boolean {
         // Try to sync first — device may already be in download mode.
         progress.status("Connecting to ROM bootloader…")
-        if (!sync(progress, attempts = 3)) {
-            // Not responding yet. Try auto-reset and give it more attempts.
-            progress.status("Sending auto-reset…")
+        if (!sync(progress, attempts = 7)) {
+            if (skipAutoReset) {
+                // Caller handles reset externally; just report failure.
+                progress.status("ROM bootloader not responding — retrying after reconnect")
+                return false
+            }
+            // Not responding. Try DTR/RTS reset and give more attempts.
+            progress.status("Triggering download mode via USB…")
             enterBootloader()
+            // After reset the device briefly disconnects; give it time to re-enumerate.
+            sleep(500)
             if (!sync(progress, attempts = 10)) {
                 progress.status(
                     "ROM bootloader not responding.\n\n" +
-                    "Manually enter bootloader mode:\n" +
-                    "1. Hold the BOOT button\n" +
-                    "2. Press and release RESET\n" +
-                    "3. Release BOOT\n\n" +
-                    "Then tap the flash button again."
+                    "If the device reconnected, grant USB permission and tap Flash again.\n\n" +
+                    "Manual entry: Hold BOOT → tap RESET → release BOOT → tap Flash."
                 )
                 return false
             }
@@ -191,21 +200,22 @@ class EspFlasher(private val port: UsbSerialPort) {
     // --- Reset sequences --------------------------------------------------------
 
     private fun enterBootloader() {
+        // Unified download-mode sequence for both UART bridges (CH340, CP210x, FTDI)
+        // and ESP32-S3 native USB-Serial/JTAG.  In both cases:
+        //   setDTR(true)  → GPIO0 = LOW  (selects ROM download mode)
+        //   setRTS(true)  → EN/CHIP_PU = LOW (reset asserted)
+        //
+        // The critical fix vs. the old code: GPIO0 must be held LOW through the
+        // moment reset is released.  The old code released GPIO0 (DTR=false) while
+        // simultaneously asserting reset, so when reset was released GPIO0 was
+        // already HIGH → chip booted normally instead of entering download mode.
         runCatching {
-            // Classic auto-reset for USB-to-UART bridges (CH340, CP210x, FTDI).
-            // DTR → GPIO0 (BOOT), RTS → EN (RESET) through bridge hardware.
-            port.setDTR(false); port.setRTS(true);  sleep(100)
-            port.setDTR(true);  port.setRTS(false); sleep(50)
-            port.setDTR(false);                     sleep(50)
-        }
-        runCatching {
-            // ESP32-S3 native USB-JTAG / USB-Serial CDC.
-            // The IDF USB CDC driver watches line-state transitions to detect the
-            // esptool double-reset pattern and calls esp_restart() into download mode.
-            port.setRTS(false); port.setDTR(false); sleep(100)
-            port.setDTR(true);                      sleep(100)
-            port.setDTR(false); port.setRTS(true);  sleep(100)
-            port.setRTS(false);                     sleep(200)
+            port.setDTR(false); port.setRTS(false); sleep(50)  // idle
+            port.setDTR(true);                      sleep(100) // GPIO0 = LOW
+            port.setRTS(true);                      sleep(50)  // EN = LOW (hold in reset)
+            port.setRTS(false);                     sleep(450) // EN = HIGH, GPIO0 still LOW → download mode
+            // Extra 450 ms lets the ESP32-S3 USB re-enumerate before we try to sync.
+            port.setDTR(false)                                  // release GPIO0
         }
         drain()
     }
@@ -271,15 +281,19 @@ class EspFlasher(private val port: UsbSerialPort) {
     }
 
     private fun writeFrame(packet: ByteArray) {
-        val out = ByteArrayOutputStream()
-        out.write(0xC0)
-        for (b in packet) when (b.toInt() and 0xFF) {
-            0xC0 -> { out.write(0xDB); out.write(0xDC) }
-            0xDB -> { out.write(0xDB); out.write(0xDD) }
-            else -> out.write(b.toInt())
+        runCatching {
+            val out = ByteArrayOutputStream()
+            out.write(0xC0)
+            for (b in packet) when (b.toInt() and 0xFF) {
+                0xC0 -> { out.write(0xDB); out.write(0xDC) }
+                0xDB -> { out.write(0xDB); out.write(0xDD) }
+                else -> out.write(b.toInt())
+            }
+            out.write(0xC0)
+            port.write(out.toByteArray(), 1000)
         }
-        out.write(0xC0)
-        port.write(out.toByteArray(), 1000)
+        // Silently ignore write errors — the port may have briefly disconnected
+        // during a device reset; sync() retries will detect and report failure.
     }
 
     private fun readFrame(timeoutMs: Int): ByteArray? {

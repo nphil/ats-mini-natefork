@@ -69,6 +69,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.Warning
 
 private val mainHandler = Handler(Looper.getMainLooper())
 private fun post(block: () -> Unit) = mainHandler.post(block)
@@ -223,6 +224,34 @@ private fun inferKind(name: String): FlashKind = when {
     else -> FlashKind.FIRMWARE
 }
 
+/**
+ * Returns a human-readable warning if [imageName] doesn't match [selectedKind], or null
+ * if the combination looks safe.  Prevents cross-partition flashing accidents.
+ */
+private fun imageKindWarning(imageName: String, selectedKind: FlashKind): String? {
+    val inferred = inferKind(imageName)
+    return when {
+        inferred == FlashKind.RECOVERY && selectedKind != FlashKind.RECOVERY ->
+            "⚠ '$imageName' looks like a recovery image but '${selectedKind.label}' is selected. " +
+            "Recovery images must be flashed at 0x10000 — switch to Recovery kind."
+        inferred != FlashKind.RECOVERY && selectedKind == FlashKind.RECOVERY ->
+            "⚠ '$imageName' doesn't look like a recovery image. " +
+            "Recovery slot expects an '*-ospi-recovery.bin' file."
+        inferred == FlashKind.FULL && selectedKind == FlashKind.FIRMWARE ->
+            "ℹ '$imageName' is a full 8 MB image (erases LittleFS). " +
+            "To preserve settings use an '*-ospi-flash.bin' instead."
+        else -> null
+    }
+}
+
+/** Returns a warning if [imageName] is unsuitable for Wi-Fi OTA (not an OTA binary). */
+private fun wifiOtaImageWarning(imageName: String): String? =
+    if (!imageName.contains("ota", ignoreCase = true) &&
+        !imageName.contains("update", ignoreCase = true))
+        "⚠ '$imageName' doesn't look like an OTA image. Wi-Fi OTA requires an '*-ospi-ota.bin'. " +
+        "Flashing a full/flash/recovery image via OTA will brick the device."
+    else null
+
 /** Source of the bytes to flash/upload. */
 private enum class FwSource { GITHUB, CACHED, LOCAL }
 
@@ -334,7 +363,22 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
                 onPick = { picker.launch(arrayOf("application/octet-stream", "*/*")) })
         }
 
-        Button(enabled = canFlash, modifier = Modifier.fillMaxWidth(), onClick = {
+        // Validation warning: check selected image matches the selected kind
+        val validationWarning = when (source) {
+            FwSource.GITHUB -> selectedAsset?.name?.let { imageKindWarning(it, kind) }
+            FwSource.CACHED -> selectedCache?.name?.let { imageKindWarning(it, kind) }
+            FwSource.LOCAL -> fileName?.let { imageKindWarning(it, kind) }
+        }
+        if (validationWarning != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error)
+                Text(validationWarning, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+            }
+        }
+
+        Button(enabled = canFlash && validationWarning == null, modifier = Modifier.fillMaxWidth(), onClick = {
             ctl.setBusy(true); ctl.setStatus("Preparing…"); ctl.setPct(0)
             ctl.scope.launch(Dispatchers.IO) {
                 try {
@@ -353,11 +397,46 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
                         FwSource.LOCAL -> fileBytes ?: run { ctl.setStatus("No file selected"); return@launch }
                     }
 
-                    val port = Controllers.usb.takePortForFlashing()
+                    // ── Step 1: try direct ROM sync (device already in bootloader mode) ──
+                    val initialPort = Controllers.usb.takePortForFlashing()
                         ?: run { ctl.setStatus("Connect the USB cable first"); return@launch }
-                    val ok = EspFlasher(port).flash(kind.offset, bytes, ctl.flashCb)
+
+                    if (EspFlasher(initialPort).flash(kind.offset, bytes, ctl.flashCb, skipAutoReset = true)) {
+                        Controllers.usb.resumeAfterFlash()
+                        return@launch
+                    }
+
+                    // ── Step 2: trigger download mode, reconnect, retry ──────────────────
+                    // Send soft reboot_dl command if radio firmware is active on USB.
+                    val connectedViaUsb = RadioRepository.status.value.transport == Transport.USB
+                    if (connectedViaUsb) {
+                        ctl.setStatus("Sending download-mode command to firmware…")
+                        Controllers.usb.writeLine("{\"cmd\":\"reboot_dl\"}")
+                        delay(300) // let firmware process the command before closing
+                    } else {
+                        ctl.setStatus("Triggering download mode via USB reset…")
+                    }
+                    Controllers.usb.closeForReset()
+
+                    ctl.setStatus("Waiting for device to reboot into download mode…")
+                    delay(if (connectedViaUsb) 2000L else 800L)
+
+                    val newPort = Controllers.usb.waitAndReopenForFlashing(8000L)
+                        ?: run {
+                            ctl.setStatus(
+                                "Device didn't reconnect after reset.\n\n" +
+                                "If a USB permission dialog appeared, grant it and tap Flash again.\n\n" +
+                                "Manual entry: Hold BOOT → tap RESET → release BOOT → tap Flash."
+                            )
+                            return@launch
+                        }
+
+                    val ok = EspFlasher(newPort).flash(kind.offset, bytes, ctl.flashCb, skipAutoReset = true)
                     Controllers.usb.resumeAfterFlash()
-                    if (ok) ctl.setStatus("Flashed ${kind.label} — radio rebooting")
+                    if (!ok) ctl.setStatus(
+                        "Flash failed.\n\nManual bootloader entry:\n" +
+                        "Hold BOOT → tap RESET → release BOOT → tap Flash."
+                    )
                 } finally { ctl.setBusy(false) }
             }
         }) { Text("Flash ${kind.label} over USB") }
@@ -446,7 +525,22 @@ private fun WifiOtaPanel(busy: Boolean, ctl: OpControls) {
                 onPick = { picker.launch(arrayOf("application/octet-stream", "*/*")) })
         }
 
-        Button(enabled = canUpload, modifier = Modifier.fillMaxWidth(), onClick = {
+        // Warn if user selected a non-OTA image for Wi-Fi OTA upload
+        val otaWarn = when (source) {
+            FwSource.CACHED -> selectedCache?.name?.let { wifiOtaImageWarning(it) }
+            FwSource.LOCAL -> fileName?.let { wifiOtaImageWarning(it) }
+            else -> null
+        }
+        if (otaWarn != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error)
+                Text(otaWarn, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+            }
+        }
+
+        Button(enabled = canUpload && otaWarn == null, modifier = Modifier.fillMaxWidth(), onClick = {
             ctl.setBusy(true); ctl.setPct(0)
             ctl.scope.launch(Dispatchers.IO) {
                 try {
