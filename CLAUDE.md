@@ -8,6 +8,25 @@
 - Before every commit: `grep VER_APP ats-mini/Common.h` → CHANGELOG entry must be labeled `VER_APP + 1`.
 - **Every release needs a CHANGELOG entry** (feature or fix). No silent releases.
 
+## Release Checklist (MANDATORY — applies to every session, every push)
+
+Every push to `main` MUST result in a complete release. Before pushing, verify all of the following are in order:
+
+1. **CHANGELOG entry exists** — `changelog/+<name>.<type>.md` fragment present for this change. Label = `VER_APP + 1`. CI assembles the entry; you must author the fragment.
+2. **Firmware binaries** — CI publishes 4 assets automatically on push to `main`:
+   - `*-ospi-ota.bin` (Web OTA)
+   - `*-ospi-flash.bin` (preserves LittleFS)
+   - `*-ospi-full.bin` (full erase)
+   - `*-ospi-recovery.bin` (factory partition, flash to 0x10000)
+   If firmware was not changed in this push, bins are still rebuilt (CI always runs on push).
+3. **Android APK** — built and published as `android-v*` release; linked in firmware release notes. CI publishes automatically when `android/` changes. If Android changed, verify the new `android-v*` tag appears and is linked.
+4. **iOS IPA** — built and published as `ios-v*` release; linked in firmware release notes. CI publishes automatically when `ios/` changes. If iOS changed, verify the new `ios-v*` tag appears and is linked.
+5. **Release notes include all download links** — firmware release body must have the Downloads table (4 firmware bins + iOS IPA link + Android APK link). The CI `build.yml` Python step handles this with `per_page=100`.
+
+**After every push, confirm the release is published** by checking the GitHub releases page (or using `mcp__github__list_releases`). If assets are missing, diagnose the CI job that failed rather than pushing a workaround.
+
+**Do not skip the CHANGELOG fragment.** A push with no fragment produces a release with empty notes, which is not acceptable.
+
 ## CI/CD
 
 ### Release assets (`firmware-auto-release` in `build.yml`)
