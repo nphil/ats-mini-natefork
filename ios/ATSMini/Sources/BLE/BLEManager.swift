@@ -472,7 +472,7 @@ extension BLEManager: CBPeripheralDelegate {
                 self.radio?.connectionStatus = "Connected"
             }
             // Subscribe to status updates
-            send(["cmd": "sub", "ms": 500])
+            send(["cmd": "sub", "ms": 250]) // floor interval; firmware sends only on change or 2 s keepalive
             // Sync time
             syncTime()
             // Load presets

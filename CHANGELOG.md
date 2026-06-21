@@ -4,6 +4,31 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.62 (2026-06-21)
+
+### Fixed
+
+- **BLE no longer freezes the main loop during data sends.** The `write()` chunking loop
+  used `delay(20)` between every BLE packet, which busy-waited and blocked all FreeRTOS
+  tasks (encoder ISR, display refresh, radio control) for up to 820 ms on the first send
+  before MTU negotiation completed. Replaced with `vTaskDelay(12 ms)` so the BLE stack,
+  encoder, and display tasks continue running between chunks.
+- **BLE status now sends only on change, not on a fixed timer.** Previously a 700-byte
+  JSON status packet was sent every 500 ms regardless of whether anything had changed.
+  Firmware now tracks frequency, mode, band, BFO, volume, AGC, RSSI, and SNR; a send
+  is triggered only when one of these changes (throttled to at most once per subscription
+  interval), plus a 2-second keepalive when the radio is idle. This eliminates ~60% of
+  BLE traffic during normal operation.
+- **BLE connection parameters optimised on connect.** Firmware now requests a 20–40 ms
+  connection interval (was unset, defaulting to 7.5 ms) which reduces per-connection
+  radio overhead and gives the BLE controller more scheduling headroom.
+
+### Changed
+
+- **iOS and Android subscription interval reduced to 250 ms** (from 500 ms). Because
+  sends are now change-driven, this is a floor for how quickly a state change reaches
+  the app, not a constant send rate. Idle traffic drops to one 700-byte packet every 2 s.
+
 ## 2.61 (2026-06-21)
 
 ### Fixed

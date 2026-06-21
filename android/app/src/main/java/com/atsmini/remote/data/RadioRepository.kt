@@ -48,7 +48,7 @@ object RadioRepository {
         _status.update { it.copy(transport = transport, connectionStatus = "Connected") }
         log("Connected via $transport", LogType.OK)
         // Bring up the live status stream + presets on connect.
-        send(Protocol.subscribe(500))
+        send(Protocol.subscribe(250)) // floor interval; firmware sends only on change or 2 s keepalive
         send(Protocol.listPresets())
         send(Protocol.setTimeNow())
     }

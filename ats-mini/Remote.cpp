@@ -298,7 +298,38 @@ void remotePrintStatus(Stream* stream, RemoteState* state)
 }
 
 //
-// Tick remote time, periodically printing status
+// Snapshot of current radio state used by change-detection in remoteTickTime.
+// Returns true if any tracked field differs from the last-sent snapshot.
+//
+static bool remoteStateChanged(RemoteState* state)
+{
+  rx.getCurrentReceivedSignalQuality();
+  return (currentFrequency != state->lastFreq  ||
+          currentBFO       != state->lastBFO   ||
+          currentMode      != state->lastMode  ||
+          bandIdx          != state->lastBandIdx ||
+          volume           != state->lastVol   ||
+          agcIdx           != state->lastAgc   ||
+          rx.getCurrentRSSI() != state->lastRSSI ||
+          rx.getCurrentSNR()  != state->lastSNR);
+}
+
+static void remoteSnapshotState(RemoteState* state)
+{
+  state->lastFreq    = currentFrequency;
+  state->lastBFO     = currentBFO;
+  state->lastMode    = currentMode;
+  state->lastBandIdx = bandIdx;
+  state->lastVol     = volume;
+  state->lastAgc     = agcIdx;
+  state->lastRSSI    = rx.getCurrentRSSI();
+  state->lastSNR     = rx.getCurrentSNR();
+}
+
+//
+// Tick remote time, periodically printing status.
+// With change-detection: sends immediately when radio state changes,
+// and at most every jsonSubMs as a floor (or 2000 ms keepalive when idle).
 //
 void remoteTickTime(Stream* stream, RemoteState* state)
 {
@@ -312,11 +343,20 @@ void remoteTickTime(Stream* stream, RemoteState* state)
     remotePrintStatus(stream, state);
   }
 
-  // JSON subscription: send status at the requested interval
-  if(state->jsonSubMs > 0 && (now - state->jsonTimer >= state->jsonSubMs))
+  // JSON subscription — emit on change or on keepalive tick.
+  if(state->jsonSubMs > 0)
   {
-    state->jsonTimer = now;
-    remoteJsonStatus(stream, state->remoteSeqnum++);
+    uint32_t elapsed = now - state->jsonTimer;
+    // Send immediately on any state change (but throttle: at most once per jsonSubMs).
+    // Also send as a keepalive every 2 s even when nothing changed.
+    bool sendNow = (elapsed >= state->jsonSubMs && remoteStateChanged(state)) ||
+                   (elapsed >= 2000);
+    if(sendNow)
+    {
+      state->jsonTimer = now;
+      remoteSnapshotState(state);
+      remoteJsonStatus(stream, state->remoteSeqnum++);
+    }
   }
 }
 

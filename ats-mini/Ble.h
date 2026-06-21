@@ -106,6 +106,10 @@ public:
   }
 
   void onConnect(BLEServer *pServer) override {
+    // Request a balanced connection interval: 20–40 ms min/max.
+    // Tighter than the default (7.5 ms) which wastes radio slots; looser than
+    // the 100+ ms that hurts responsiveness. Supervision timeout = 4 s.
+    pServer->updateConnParams(pServer->getConnId(), 0x10, 0x20, 0, 400);
   }
 
   void onDisconnect(BLEServer *pServer) override {
@@ -159,29 +163,26 @@ public:
 
   size_t write(const uint8_t *data, size_t size)
   {
-    if (pTxCharacteristic)
-    {
-      size_t chunkSize = BLEDevice::getMTU() - 3;
-      if (chunkSize == 0) chunkSize = 20;
-      size_t remainingByteCount = size;
-      while (remainingByteCount >= chunkSize)
-      {
-        delay(20);
-        pTxCharacteristic->setValue(const_cast<uint8_t*>(data), chunkSize);
-        pTxCharacteristic->notify();
-        data += chunkSize;
-        remainingByteCount -= chunkSize;
-      }
-      if (remainingByteCount > 0)
-      {
-        delay(20);
-        pTxCharacteristic->setValue(const_cast<uint8_t*>(data), remainingByteCount);
-        pTxCharacteristic->notify();
-      }
-      return size;
+    if (!pTxCharacteristic) return 0;
+
+    size_t chunkSize = BLEDevice::getMTU() - 3;
+    if (chunkSize < 20) chunkSize = 20;
+
+    const uint8_t* ptr = data;
+    size_t remaining   = size;
+    while (remaining > 0) {
+      size_t n = (remaining < chunkSize) ? remaining : chunkSize;
+      pTxCharacteristic->setValue(const_cast<uint8_t*>(ptr), n);
+      pTxCharacteristic->notify();
+
+      ptr       += n;
+      remaining -= n;
+      // Inter-chunk pause: yield to FreeRTOS (BLE task, encoder ISR, display)
+      // instead of busy-waiting with delay(). One BLE connection event is ~20 ms;
+      // 12 ms gives the stack time to queue the packet without over-blocking.
+      if (remaining > 0) vTaskDelay(pdMS_TO_TICKS(12));
     }
-    else
-      return 0;
+    return size;
   }
 
   size_t write(uint8_t byte)
