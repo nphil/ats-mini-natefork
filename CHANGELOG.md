@@ -4,6 +4,30 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.58 (2026-06-21)
+
+### Changed
+
+- **Recovery UI — instant menu, no more post-splash Wi-Fi screen.** The recovery
+  firmware no longer blocks on a "Trying BEAST_ROUTER… / IoT…" connect screen after
+  the KQ4TXO splash (which could stall the menu for up to 20 s). Networking now comes
+  up in the background: the `ATS-Recovery` soft-AP starts instantly (so the Android app
+  can always reach it) while STA connects to a known router asynchronously for internet
+  (GitHub OTA). The main menu appears the moment the splash ends.
+- **Explicit "Back" items in every submenu.** Network, Wi-Fi Scan, OTA, and Web Server
+  screens now end with a selectable **Back** entry instead of relying on a long-press
+  (long-press still works as a shortcut).
+- **Web Server screen is now a proper menu** (Web Server ON/OFF + Back) showing the
+  live URL and the AP name to join.
+
+### Fixed
+
+- **No more full-screen flashing when moving the selection.** Menu and list screens now
+  do a flicker-free partial redraw — only the rows whose highlight changed are repainted,
+  instead of clearing and redrawing the entire screen on every encoder step.
+- **Duplicate Wi-Fi networks removed from the scan list.** Mesh networks that broadcast
+  the same SSID from multiple nodes are now de-duplicated, keeping the strongest signal.
+
 ## 2.57 (2026-06-21)
 
 ### Changed

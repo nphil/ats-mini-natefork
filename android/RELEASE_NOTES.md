@@ -17,9 +17,19 @@ optimized for both phones and tablets.
   bootloop directly from the phone.
 - **One-tap USB firmware flashing** (ESP32-S3 ROM bootloader) — recover a bricked
   radio with no PC.
-- **Auto-join the "ATS-Mini Recovery" Wi-Fi AP and upload OTA firmware** in one
+- **Auto-join the "ATS-Recovery" Wi-Fi AP and upload OTA firmware** in one
   tap (with Shizuku).
 - **Silent USB permission + radio auto-toggle** via Shizuku.
 - Home-screen widget, Quick Settings tile, and a media-style notification.
 
 Sideload and auto-update via **Obtainium** straight from GitHub Releases.
+
+## Recent changes
+
+- **Single-screen, no-scroll layout.** Every tab fits the viewport — no page scrolling.
+  The Tools tab is now a compact device-status header plus a segmented switch between
+  **USB flash**, **Wi-Fi OTA**, and **Console** panels, with a shared progress strip so
+  a flash in progress stays visible when you switch panels.
+- **Status bar no longer overlaps content** (proper edge-to-edge insets).
+- **Recovery OTA matches the new recovery firmware** — joins the `ATS-Recovery` AP
+  (password `ats12345`) and uploads over the air.

@@ -1,11 +1,11 @@
 package com.atsmini.remote.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.GraphicEq
@@ -47,12 +47,16 @@ fun AppRoot(onRequestUsb: () -> Unit) {
             }
         },
     ) {
+        // The Surface paints edge-to-edge (its background fills behind the status
+        // bar); the inner Box insets content so nothing overlaps the status bar.
         Surface(Modifier.fillMaxSize()) {
-            when (dest) {
-                Dest.RADIO -> RadioPane()
-                Dest.VISUALIZE -> Scroll { VisualizeScreen() }
-                Dest.TOOLS -> ToolsScreen(onRequestUsb = onRequestUsb)
-                Dest.SETTINGS -> SettingsScreen()
+            Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                when (dest) {
+                    Dest.RADIO -> RadioPane()
+                    Dest.VISUALIZE -> VisualizeScreen()
+                    Dest.TOOLS -> ToolsScreen(onRequestUsb = onRequestUsb)
+                    Dest.SETTINGS -> SettingsScreen()
+                }
             }
         }
     }
@@ -64,18 +68,11 @@ private fun RadioPane() {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= 720.dp) {
             Row(Modifier.fillMaxSize()) {
-                Scroll(Modifier.weight(1f).fillMaxHeight()) { RadioScreen() }
-                Scroll(Modifier.weight(1f).fillMaxHeight()) { VisualizeScreen() }
+                Box(Modifier.weight(1f).fillMaxHeight()) { RadioScreen() }
+                Box(Modifier.weight(1f).fillMaxHeight()) { VisualizeScreen() }
             }
         } else {
-            Scroll { RadioScreen() }
+            RadioScreen()
         }
     }
-}
-
-@Composable
-private fun Scroll(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    androidx.compose.foundation.layout.Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-    ) { content() }
 }

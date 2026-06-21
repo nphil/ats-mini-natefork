@@ -12,6 +12,10 @@ import java.net.URL
 object RecoveryOta {
     const val RECOVERY_HOST = "192.168.4.1"
 
+    // Recovery firmware soft-AP (ats-mini-recovery.ino).
+    const val RECOVERY_SSID = "ATS-Recovery"
+    const val RECOVERY_PASS = "ats12345"
+
     interface Progress {
         fun status(message: String)
         fun percent(value: Int)

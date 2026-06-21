@@ -5,7 +5,11 @@
  * Otherwise auto-boots main firmware after 2s. Boot-loop detection at 3 fails.
  *
  * Main menu: Boot / Erase Data / Network / Reboot
- * Network:   WiFi Scan → keyboard → connect | OTA list | Web Server
+ * Network:   WiFi Scan → keyboard → connect | OTA list | Web Server | Back
+ *
+ * Networking is brought up in the background (AP+STA): the "ATS-Recovery" AP is
+ * always available for the Android app, while STA connects to a known router for
+ * internet (GitHub OTA). The menu appears instantly — no blocking connect screen.
  *
  * Encoder: GPIO2 (A), GPIO1 (B), GPIO21 (button)
  * Display: ST7789 320×170 (rotation 3, 8-bit parallel)
@@ -57,7 +61,7 @@ static const int ITEM_H = 27;
 // ── Screens ───────────────────────────────────────────────────────────────────
 enum Screen : uint8_t {
   SCR_MAIN, SCR_ERASE_CONFIRM, SCR_NETWORK,
-  SCR_WIFI_SCAN, SCR_WIFI_KB, SCR_WIFI_CONN,
+  SCR_WIFI_SCAN, SCR_WIFI_KB,
   SCR_OTA_LIST, SCR_OTA_PROGRESS, SCR_WEBSERVER,
 };
 
@@ -67,6 +71,7 @@ static const KnownNet KNOWN[] = {
   { "BEAST_ROUTER", "appu1989" },
   { "IoT",          "appu1989" },
 };
+static const int KNOWN_CNT = sizeof(KNOWN) / sizeof(KNOWN[0]);
 static const char* AP_SSID = "ATS-Recovery";
 static const char* AP_PASS = "ats12345";
 
@@ -81,9 +86,18 @@ static WebServer server(80);
 static Screen cur = SCR_MAIN;
 static int    sel = 0;
 static bool   dirty = true;
+static bool   fullDraw = true;     // true → clear + redraw all; false → only changed rows
+static int    lastSel = -1;        // previously highlighted row (for partial redraw)
+static int    lastStart = -1;      // previous scroll offset (list screens)
+static bool   footerDirty = false; // footer needs refresh (network state changed)
 static bool   wifiOK = false;
 static bool   apMode = false;
 static bool   webOn  = false;
+
+// ── Background STA connection state ────────────────────────────────────────────
+static bool     staTrying  = false;
+static int      staTryIdx  = 0;
+static uint32_t staTryStart = 0;
 
 // ── Encoder (ISR) ─────────────────────────────────────────────────────────────
 static volatile int8_t encAcc = 0;
@@ -194,6 +208,23 @@ static SerialSt sst = SS_IDLE;
 static size_t sOtaExp = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Redraw bookkeeping
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Request a full screen redraw (used when non-selection content changes).
+static void needFull() { dirty = true; fullDraw = true; lastSel = -1; lastStart = -1; }
+
+// Compute scroll offset that keeps `sel` visible, biased to the previous offset.
+static int listStart(int s, int total, int vis) {
+  int start = (lastStart < 0) ? 0 : lastStart;
+  if (s < start) start = s;
+  if (s >= start + vis) start = s - vis + 1;
+  if (start > total - vis) start = total - vis;
+  if (start < 0) start = 0;
+  return start;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Display helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -212,15 +243,15 @@ static void drawFooter() {
   tft.setTextColor(D_COMMENT, D_LINE);
   tft.setTextFont(1);
   tft.setTextDatum(ML_DATUM);
-  char buf[72];
+  char buf[80];
   if (wifiOK)
     snprintf(buf, sizeof(buf), "WiFi: %s   %s",
              WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
   else if (apMode)
-    snprintf(buf, sizeof(buf), "AP: %s   %s", AP_SSID,
-             WiFi.softAPIP().toString().c_str());
+    snprintf(buf, sizeof(buf), "AP: %s   %s   (STA connecting...)",
+             AP_SSID, WiFi.softAPIP().toString().c_str());
   else
-    strcpy(buf, "WiFi: not connected");
+    strcpy(buf, "WiFi: starting...");
   tft.drawString(buf, 4, FTR_Y + FTR_H / 2);
 }
 
@@ -264,6 +295,50 @@ static void drawProgressBar(int y, size_t done, size_t total) {
   }
 }
 
+// Generic small menu renderer with flicker-free partial redraw.
+static void renderMenu(const char* title, const char* const* labels,
+                       const char* const* values, int n) {
+  if (fullDraw) {
+    tft.fillScreen(D_BG);
+    drawHeader(title);
+    drawFooter();
+    for (int i = 0; i < n; i++)
+      drawItem(i, labels[i], values ? values[i] : nullptr, i == sel);
+  } else {
+    if (lastSel >= 0 && lastSel < n && lastSel != sel)
+      drawItem(lastSel, labels[lastSel], values ? values[lastSel] : nullptr, false);
+    if (sel >= 0 && sel < n)
+      drawItem(sel, labels[sel], values ? values[sel] : nullptr, true);
+    if (footerDirty) drawFooter();
+  }
+}
+
+// Generic scrollable list renderer with flicker-free partial redraw.
+// itemLabel(i) returns the label; itemValue(i) the right-aligned value (or "").
+static void renderList(const char* title, int total,
+                       const char* (*itemLabel)(int, char*),
+                       const char* (*itemValue)(int, char*)) {
+  int vis = BODY_H / ITEM_H;
+  if (fullDraw) { tft.fillScreen(D_BG); drawHeader(title); drawFooter(); }
+  int start = listStart(sel, total, vis);
+  bool scrolled = (start != lastStart);
+  char lbuf[40], vbuf[16];
+  for (int row = 0; row < vis; row++) {
+    int i = start + row;
+    bool redraw = fullDraw || scrolled || (i == sel) || (i == lastSel);
+    if (!redraw) continue;
+    if (i < total) {
+      const char* lab = itemLabel(i, lbuf);
+      const char* val = itemValue ? itemValue(i, vbuf) : nullptr;
+      drawItem(row, lab, val, i == sel);
+    } else {
+      tft.fillRect(0, BODY_Y + row * ITEM_H, W, ITEM_H, D_BG);
+    }
+  }
+  if (footerDirty && !fullDraw) drawFooter();
+  lastStart = start;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Splash screen
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,23 +346,19 @@ static void drawProgressBar(int y, size_t done, size_t total) {
 static bool splashAndDecide() {
   tft.fillScreen(D_BG);
 
-  // Callsign — large (Font4 = 26px)
   tft.setTextColor(D_CYAN, D_BG);
   tft.setTextFont(4);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("KQ4TXO", W / 2, 52);
 
-  // Sub-title
   tft.setTextColor(D_PURPLE, D_BG);
   tft.setTextFont(2);
   tft.drawString("ATS-Mini Recovery", W / 2, 88);
 
-  // Hint
   tft.setTextColor(D_YELLOW, D_BG);
   tft.setTextFont(1);
-  tft.drawString("Hold encoder to enter recovery UI", W / 2, 112);
+  tft.drawString("Hold encoder to enter recovery", W / 2, 112);
 
-  // Check boot-loop counter
   Preferences bc;
   bc.begin("recovery", false, "settings");
   int bootCount = bc.getInt("bootcount", 0);
@@ -306,7 +377,6 @@ static bool splashAndDecide() {
     return true;
   }
 
-  // 2-second countdown with progress bar; button hold cancels
   bool held = (digitalRead(PIN_BTN) == LOW);
   uint32_t start = millis();
   while (!held && millis() - start < 2000) {
@@ -319,7 +389,6 @@ static bool splashAndDecide() {
   }
 
   if (!held) {
-    // Increment counter before forwarding
     Preferences bc3;
     bc3.begin("recovery", false, "settings");
     bc3.putInt("bootcount", bootCount + 1);
@@ -333,10 +402,8 @@ static bool splashAndDecide() {
       delay(200);
       esp_restart();
     }
-    // Fall through if ota_0 not available
   }
 
-  // Arrived here: button was held or no ota_0 partition
   return true;
 }
 
@@ -345,94 +412,79 @@ static bool splashAndDecide() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void drawMain() {
-  tft.fillScreen(D_BG);
-  drawHeader("Recovery");
   static const char* labels[] = { "Boot Firmware", "Erase Data", "Network", "Reboot" };
-  for (int i = 0; i < 4; i++) drawItem(i, labels[i], nullptr, i == sel);
-  drawFooter();
-}
-
-static void drawEraseConfirm() {
-  tft.fillScreen(D_BG);
-  drawHeader("Erase Data?");
-  clearBody();
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(D_FG, D_BG);
-  tft.drawString("Erase all saved settings?", W / 2, 68);
-  tft.setTextColor(D_COMMENT, D_BG);
-  tft.setTextFont(1);
-  tft.drawString("Band presets, themes, WiFi — all cleared", W / 2, 88);
-
-  // sel 0 = No (left), sel 1 = Yes (right)
-  uint16_t noBg  = (sel == 0) ? D_GREEN : D_LINE;
-  uint16_t yesBg = (sel == 1) ? D_RED   : D_LINE;
-  tft.fillRoundRect(40,  115, 90, 28, 5, noBg);
-  tft.setTextColor((sel == 0) ? D_BG : D_FG, noBg);
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("No",  85,  129);
-
-  tft.fillRoundRect(190, 115, 90, 28, 5, yesBg);
-  tft.setTextColor(D_FG, yesBg);
-  tft.drawString("Yes", 235, 129);
-  drawFooter();
+  renderMenu("Recovery", labels, nullptr, 4);
 }
 
 static void drawNetwork() {
-  tft.fillScreen(D_BG);
-  drawHeader("Network");
-  drawItem(0, "WiFi Scan",  nullptr,             sel == 0);
-  drawItem(1, "OTA Update", nullptr,             sel == 1);
-  drawItem(2, "Web Server", webOn ? "ON" : "OFF", sel == 2);
-  // Back hint
-  tft.setTextColor(D_COMMENT, D_BG);
-  tft.setTextFont(1);
-  tft.setTextDatum(MR_DATUM);
-  tft.drawString("Long press = back", W - 4, BODY_Y + 3 * ITEM_H + ITEM_H / 2);
-  drawFooter();
+  static const char* labels[] = { "WiFi Scan", "OTA Update", "Web Server", "Back" };
+  const char* values[] = { nullptr, nullptr, webOn ? "ON" : "OFF", nullptr };
+  renderMenu("Network", labels, values, 4);
+}
+
+static void drawEraseConfirm() {
+  if (fullDraw) {
+    tft.fillScreen(D_BG);
+    drawHeader("Erase Data?");
+    tft.setTextFont(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(D_FG, D_BG);
+    tft.drawString("Erase all saved settings?", W / 2, 60);
+    tft.setTextColor(D_COMMENT, D_BG);
+    tft.setTextFont(1);
+    tft.drawString("Band presets, themes, WiFi - all cleared", W / 2, 82);
+    drawFooter();
+  }
+  // sel 0 = No (left/green), sel 1 = Yes (right/red)
+  uint16_t noBg  = (sel == 0) ? D_GREEN : D_LINE;
+  uint16_t yesBg = (sel == 1) ? D_RED   : D_LINE;
+  tft.fillRoundRect(40,  108, 90, 30, 5, noBg);
+  tft.setTextColor((sel == 0) ? D_BG : D_FG, noBg);
+  tft.setTextFont(2);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("No",  85,  123);
+  tft.fillRoundRect(190, 108, 90, 30, 5, yesBg);
+  tft.setTextColor(D_FG, yesBg);
+  tft.drawString("Yes", 235, 123);
+}
+
+static const char* scanLabel(int i, char* buf) {
+  if (i >= scannedCnt) { strcpy(buf, "Back"); return buf; }
+  strncpy(buf, scanned[i].ssid.c_str(), 38); buf[38] = 0;
+  return buf;
+}
+static const char* scanValue(int i, char* buf) {
+  if (i >= scannedCnt) { buf[0] = 0; return buf; }
+  int bars = scanned[i].rssi > -55 ? 4 : scanned[i].rssi > -67 ? 3 :
+             scanned[i].rssi > -78 ? 2 : 1;
+  snprintf(buf, 16, "%ddBm  %d/4", (int)scanned[i].rssi, bars);
+  return buf;
 }
 
 static void drawWifiScan() {
-  tft.fillScreen(D_BG);
-  drawHeader("Select Network");
   if (scanning) {
-    clearBody();
-    tft.setTextColor(D_CYAN, D_BG);
-    tft.setTextFont(2);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("Scanning...", W / 2, BODY_Y + BODY_H / 2);
-  } else if (scannedCnt == 0) {
-    clearBody();
-    tft.setTextColor(D_COMMENT, D_BG);
-    tft.setTextFont(2);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("No networks found", W / 2, BODY_Y + BODY_H / 2);
-  } else {
-    int total = scannedCnt + 1;
-    int vis = BODY_H / ITEM_H;
-    int start = max(0, min(sel, total - vis));
-    for (int i = start; i < start + vis && i < total; i++) {
-      int row = i - start;
-      if (i < scannedCnt) {
-        char sig[6];
-        int bars = scanned[i].rssi > -55 ? 4 : scanned[i].rssi > -67 ? 3 :
-                   scanned[i].rssi > -78 ? 2 : 1;
-        snprintf(sig, sizeof(sig), " %d\xe2\x96\x8a", bars);
-        drawItem(row, scanned[i].ssid.c_str(), sig, i == sel);
-      } else {
-        drawItem(row, "[Back]", nullptr, i == sel);
-      }
+    if (fullDraw) {
+      tft.fillScreen(D_BG); drawHeader("Select Network"); drawFooter();
+      tft.setTextColor(D_CYAN, D_BG);
+      tft.setTextFont(2);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("Scanning...", W / 2, BODY_Y + BODY_H / 2);
     }
+    return;
   }
-  drawFooter();
+  if (scannedCnt == 0) {
+    // Only the [Back] item
+    static const char* one[] = { "Back" };
+    renderMenu("Select Network", one, nullptr, 1);
+    return;
+  }
+  renderList("Select Network", scannedCnt + 1, scanLabel, scanValue);
 }
 
 // Keyboard: 4 rows, encoder left/right = col, long press = next row
 static void drawKbKey(int row, int col) {
-  // Key geometry per row
   static const int KEY_H = 23, GAP = 2;
-  const int KY = 56; // keyboard area starts at y=56
+  const int KY = 56;
 
   bool hi = (row == kbRow && col == kbCol);
   char c = kbChar(row, col);
@@ -449,7 +501,6 @@ static void drawKbKey(int row, int col) {
     if (col < n - 1) { x = 2 + col * 32; }
     else             { x = 2 + (n - 1) * 32; kw = 320 - x - 2; }
   } else {
-    // row 3: [SHF/ABC][123/SYM][SPACE][OK]
     static const int r3x[] = { 2, 66, 132, 248 };
     static const int r3w[] = { 62, 64, 114, 70 };
     x = r3x[col]; kw = r3w[col];
@@ -480,9 +531,10 @@ static void drawKbKey(int row, int col) {
 }
 
 static void drawKb() {
-  tft.fillScreen(D_BG);
-  drawHeader("WiFi Password");
-
+  if (fullDraw) {
+    tft.fillScreen(D_BG);
+    drawHeader("WiFi Password");
+  }
   // Pass display area y=22..54
   tft.fillRect(0, HDR_H, W, 32, D_LINE);
   tft.setTextFont(1);
@@ -490,56 +542,38 @@ static void drawKb() {
   tft.setTextColor(D_COMMENT, D_LINE);
   tft.drawString(kbSSID.c_str(), 5, HDR_H + 9);
 
-  // Password as dots
   String dots;
-  for (size_t i = 0; i < kbPass.length(); i++) dots += '\xb7';
+  for (size_t i = 0; i < kbPass.length(); i++) dots += '*';
   dots += '_';
   tft.setTextColor(D_FG, D_LINE);
   tft.drawString(("Pass: " + dots).c_str(), 5, HDR_H + 22);
 
-  // Draw all keys
   for (int r = 0; r < 4; r++)
     for (int c = 0; c < kbRowLen(r); c++)
       drawKbKey(r, c);
 }
 
-static void drawWifiConn() {
-  tft.fillScreen(D_BG);
-  drawHeader("Connecting...");
-  clearBody();
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(D_FG, D_BG);
-  tft.drawString("Connecting to:", W / 2, BODY_Y + 22);
-  tft.setTextColor(D_CYAN, D_BG);
-  tft.drawString(kbSSID.c_str(), W / 2, BODY_Y + 48);
-  drawFooter();
+static const char* otaLabel(int i, char* buf) {
+  if (i >= relCnt) { strcpy(buf, "Back"); return buf; }
+  strncpy(buf, releases[i].tag, 38); buf[38] = 0;
+  return buf;
 }
 
 static void drawOtaList() {
-  tft.fillScreen(D_BG);
-  drawHeader("OTA: Pick Release");
   if (!relLoaded) {
-    clearBody();
-    tft.setTextColor(relErr[0] ? D_RED : D_CYAN, D_BG);
-    tft.setTextFont(2);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString(relErr[0] ? relErr : "Loading...", W / 2, BODY_Y + BODY_H / 2);
-  } else {
-    int total = relCnt + 1;
-    int vis = BODY_H / ITEM_H;
-    int start = max(0, min(sel, total - vis));
-    for (int i = start; i < start + vis && i < total; i++) {
-      int row = i - start;
-      if (i < relCnt) drawItem(row, releases[i].tag, nullptr, i == sel);
-      else            drawItem(row, "[Back]",         nullptr, i == sel);
+    if (fullDraw) {
+      tft.fillScreen(D_BG); drawHeader("OTA: Pick Release"); drawFooter();
+      tft.setTextColor(relErr[0] ? D_RED : D_CYAN, D_BG);
+      tft.setTextFont(2);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString(relErr[0] ? relErr : "Loading...", W / 2, BODY_Y + BODY_H / 2);
     }
+    return;
   }
-  drawFooter();
+  renderList("OTA: Pick Release", relCnt + 1, otaLabel, nullptr);
 }
 
 static void drawOtaProgress() {
-  // Called repeatedly during download — don't clear full screen each time
   int y = BODY_Y;
   tft.fillRect(0, y, W, FTR_Y - y, D_BG);
   tft.setTextColor(D_FG, D_BG);
@@ -547,40 +581,45 @@ static void drawOtaProgress() {
   tft.setTextDatum(MC_DATUM);
   tft.drawString(otaTag[0] ? otaTag : "Downloading...", W / 2, y + 22);
   drawProgressBar(y + 48, otaWritten, otaTotal);
-  // Don't call drawFooter every time to reduce flicker
 }
 
 static void drawWebSrv() {
-  tft.fillScreen(D_BG);
-  drawHeader("Web Server");
-  clearBody();
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  if (webOn) {
-    tft.setTextColor(D_GREEN, D_BG);
-    tft.drawString("Running", W / 2, BODY_Y + 16);
-    String url = "http://" +
-      (wifiOK ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
-    tft.setTextColor(D_CYAN, D_BG);
-    tft.setTextFont(1);
-    tft.drawString(url.c_str(), W / 2, BODY_Y + 36);
-    tft.setTextColor(D_COMMENT, D_BG);
-    tft.drawString("Open in browser to flash / manage device", W / 2, BODY_Y + 50);
-    tft.fillRoundRect(W/2 - 55, BODY_Y + 65, 110, 28, 5, D_RED);
-    tft.setTextColor(D_FG, D_RED);
+  static const char* labels[] = { "Web Server", "Back" };
+  const char* values[] = { webOn ? "ON" : "OFF", nullptr };
+  if (fullDraw) {
+    tft.fillScreen(D_BG);
+    drawHeader("Web Server");
+    drawFooter();
+    // Two selectable rows at top
+    drawItem(0, labels[0], values[0], sel == 0);
+    drawItem(1, labels[1], values[1], sel == 1);
+    // Status + URL below the items
+    int sy = BODY_Y + 2 * ITEM_H + 8;
+    tft.setTextDatum(ML_DATUM);
     tft.setTextFont(2);
-    tft.drawString("Turn OFF", W / 2, BODY_Y + 79);
+    if (webOn) {
+      tft.setTextColor(D_GREEN, D_BG);
+      tft.drawString("Running", 10, sy);
+      String url = "http://" +
+        (wifiOK ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
+      tft.setTextColor(D_CYAN, D_BG);
+      tft.setTextFont(1);
+      tft.drawString(url.c_str(), 10, sy + 20);
+      tft.setTextColor(D_COMMENT, D_BG);
+      tft.drawString("Join '" + String(AP_SSID) + "' then open the URL", 10, sy + 34);
+    } else {
+      tft.setTextColor(D_RED, D_BG);
+      tft.drawString("Stopped", 10, sy);
+      tft.setTextColor(D_COMMENT, D_BG);
+      tft.setTextFont(1);
+      tft.drawString("Turn ON to flash / manage over WiFi", 10, sy + 20);
+    }
   } else {
-    tft.setTextColor(D_RED, D_BG);
-    tft.drawString("Stopped", W / 2, BODY_Y + 16);
-    tft.fillRoundRect(W/2 - 55, BODY_Y + 65, 110, 28, 5, D_GREEN);
-    tft.setTextColor(D_BG, D_GREEN);
-    tft.drawString("Turn ON", W / 2, BODY_Y + 79);
+    if (lastSel >= 0 && lastSel < 2 && lastSel != sel)
+      drawItem(lastSel, labels[lastSel], values[lastSel], false);
+    drawItem(sel, labels[sel], values[sel], true);
+    if (footerDirty) drawFooter();
   }
-  tft.setTextColor(D_COMMENT, D_BG);
-  tft.setTextFont(1);
-  tft.drawString("Press = toggle   Long press = back", W / 2, FTR_Y - 8);
-  drawFooter();
 }
 
 static void redraw() {
@@ -594,6 +633,9 @@ static void redraw() {
     case SCR_WEBSERVER:     drawWebSrv();       break;
     default: break;
   }
+  lastSel = sel;
+  fullDraw = false;
+  footerDirty = false;
   dirty = false;
 }
 
@@ -601,15 +643,35 @@ static void redraw() {
 // WiFi helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void startScan() {
-  scannedCnt = 0; scanning = true;
-  if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
-  WiFi.scanNetworks(true, false);
-  dirty = true;
+// Bring up AP immediately + start STA connection in the background (non-blocking).
+static void netInit() {
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  apMode = true;
+  staTrying = true; staTryIdx = 0; staTryStart = millis();
+  WiFi.begin(KNOWN[0].ssid, KNOWN[0].pass);
 }
 
+// Advance the background STA connection. Call every loop; never blocks.
+static void netTick() {
+  if (!staTrying) return;
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiOK = true; staTrying = false;
+    footerDirty = true; dirty = true;
+    Serial.printf("{\"wifi\":\"connected\",\"ssid\":\"%s\",\"ip\":\"%s\"}\n",
+      WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    return;
+  }
+  if (millis() - staTryStart > 7000) {
+    staTryIdx++;
+    if (staTryIdx >= KNOWN_CNT) { staTrying = false; return; } // stay AP-only
+    WiFi.begin(KNOWN[staTryIdx].ssid, KNOWN[staTryIdx].pass);
+    staTryStart = millis();
+  }
+}
+
+// Blocking connect for the password-entry flow (draws a spinner). Keeps AP up.
 static bool connectToNetwork(const char* ssid, const char* pass) {
-  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
   uint32_t t = millis();
   int spin = 0;
@@ -617,24 +679,16 @@ static bool connectToNetwork(const char* ssid, const char* pass) {
     wl_status_t s = WiFi.status();
     if (s == WL_CONNECTED) return true;
     if (s == WL_NO_SSID_AVAIL || s == WL_CONNECT_FAILED) break;
-    // Animate spinner on screen
     static const char spins[] = "|/-\\";
     char sp[3] = { spins[spin++ % 4], 0 };
     tft.setTextColor(D_PURPLE, D_BG);
     tft.setTextFont(4);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(sp, W / 2, BODY_Y + 78);
-    delay(200);
+    delay(180);
   }
-  WiFi.disconnect(true); delay(100);
+  WiFi.disconnect();
   return false;
-}
-
-static void startAP() {
-  apMode = true;
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  delay(300);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -643,7 +697,7 @@ static void startAP() {
 
 static bool fetchReleases(int perPage = 25) {
   relCnt = 0; relLoaded = false; relErr[0] = 0;
-  if (!wifiOK) { strcpy(relErr, "No WiFi"); return false; }
+  if (!wifiOK) { strcpy(relErr, "No internet (STA not connected)"); return false; }
 
   char apiUrl[128];
   snprintf(apiUrl, sizeof(apiUrl),
@@ -683,7 +737,6 @@ static bool fetchReleases(int perPage = 25) {
   http.end();
   buf[got] = 0;
 
-  // Parse: find "tag_name":"..." then look for "-ospi-ota.bin" asset URL within ~12 KB forward
   const char* p = buf;
   while (relCnt < 25) {
     const char* tp = strstr(p, "\"tag_name\":\"");
@@ -727,6 +780,7 @@ static bool fetchReleases(int perPage = 25) {
 static bool downloadAndFlash(const char* url, const char* tag = "") {
   strncpy(otaTag, tag, sizeof(otaTag) - 1);
   cur = SCR_OTA_PROGRESS;
+  tft.fillScreen(D_BG);
   drawHeader("Flashing...");
   otaTotal = 0; otaWritten = 0;
   drawOtaProgress();
@@ -972,10 +1026,7 @@ static void webHandleStatus() {
 }
 
 static void webHandleReleases() {
-  if (!relLoaded) {
-    // Block and fetch (caller waits)
-    fetchReleases(50);
-  }
+  if (!relLoaded) fetchReleases(50);
   String json = "[";
   for (int i = 0; i < relCnt; i++) {
     if (i) json += ",";
@@ -992,12 +1043,9 @@ static void webHandleReleases() {
 static void webHandleUploadBody() {
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    if (!otaBegin()) return;
+    otaBegin();
   } else if (up.status == UPLOAD_FILE_WRITE) {
     otaWrite(up.buf, up.currentSize);
-    if (otaTotal > 0 && (otaWritten % 65536) < up.currentSize) {
-      Serial.printf("{\"web_ota_progress\":%u}\n", (unsigned)otaWritten);
-    }
   } else if (up.status == UPLOAD_FILE_END) {
     if (otaOn) otaFinish();
   }
@@ -1015,7 +1063,7 @@ static void webHandleUploadEnd() {
 static void webHandleFlashUrl() {
   if (!server.hasArg("url")) { server.send(400, "text/plain", "Missing url"); return; }
   String url = server.arg("url");
-  server.send(200, "text/plain", "Starting download — watch device display");
+  server.send(200, "text/plain", "Starting download - watch device display");
   server.client().stop();
   delay(100);
   downloadAndFlash(url.c_str());
@@ -1043,11 +1091,15 @@ static void startWebServer() {
   server.on("/reboot",      HTTP_POST, webHandleReboot);
   server.begin();
   webOn = true;
-  dirty = true;
+}
+
+static void stopWebServer() {
+  server.stop();
+  webOn = false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Serial JSON (Android OTA protocol — unchanged from v1)
+// Serial JSON (Android OTA protocol)
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void handleSerialCmd(const char* line) {
@@ -1105,7 +1157,8 @@ static void handleSerial() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void goTo(Screen s, int initSel = 0) {
-  cur = s; sel = initSel; dirty = true;
+  cur = s; sel = initSel;
+  dirty = true; fullDraw = true; lastSel = -1; lastStart = -1;
 }
 
 static void eraseSettings() {
@@ -1122,37 +1175,66 @@ static void bootMain() {
     tft.drawString("Booting main firmware...", W / 2, H / 2);
     delay(300); esp_restart();
   }
-  // No ota_0 partition — stay in recovery
   dirty = true;
+}
+
+static void startScan() {
+  scannedCnt = 0; scanning = true;
+  WiFi.scanNetworks(true, false);
+  needFull();
+}
+
+// Wait (up to ms) for STA to come up before an internet action, showing a note.
+static void waitForWifi(uint32_t ms) {
+  if (wifiOK) return;
+  tft.fillScreen(D_BG);
+  drawHeader("OTA Update");
+  tft.setTextColor(D_CYAN, D_BG);
+  tft.setTextFont(2);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Connecting to WiFi...", W / 2, BODY_Y + BODY_H / 2);
+  uint32_t t = millis();
+  int spin = 0;
+  while (!wifiOK && millis() - t < ms) {
+    netTick();
+    static const char spins[] = "|/-\\";
+    char sp[3] = { spins[spin++ % 4], 0 };
+    tft.setTextColor(D_PURPLE, D_BG);
+    tft.setTextFont(4);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(sp, W / 2, BODY_Y + BODY_H / 2 + 28);
+    delay(150);
+  }
 }
 
 static void processInput() {
   int enc = encPop();
   int btn = btnEvent();
 
-  // WiFi scan poll (background)
+  // WiFi scan poll (background) — dedupe SSIDs (mesh networks repeat)
   if (scanning && cur == SCR_WIFI_SCAN) {
     int n = WiFi.scanComplete();
     if (n >= 0) {
       scanning = false;
-      scannedCnt = min(n, 20);
-      for (int i = 0; i < scannedCnt; i++) {
-        scanned[i].ssid = WiFi.SSID(i);
-        scanned[i].rssi = WiFi.RSSI(i);
+      scannedCnt = 0;
+      for (int i = 0; i < n && scannedCnt < 20; i++) {
+        String s = WiFi.SSID(i);
+        if (s.length() == 0) continue;            // skip hidden
+        int found = -1;
+        for (int j = 0; j < scannedCnt; j++)
+          if (scanned[j].ssid == s) { found = j; break; }
+        if (found >= 0) {
+          if (WiFi.RSSI(i) > scanned[found].rssi) scanned[found].rssi = WiFi.RSSI(i);
+        } else {
+          scanned[scannedCnt].ssid = s;
+          scanned[scannedCnt].rssi = WiFi.RSSI(i);
+          scannedCnt++;
+        }
       }
       WiFi.scanDelete();
-      sel = 0; dirty = true;
-    } else {
-      if (enc || btn) dirty = true;
+      sel = 0; needFull();
     }
     if (scanning) return;
-  }
-
-  // Spinner redraw for connecting screen
-  if (cur == SCR_WIFI_CONN) {
-    static uint32_t lastSpin = 0;
-    if (millis() - lastSpin > 200) { lastSpin = millis(); dirty = true; }
-    return; // connecting is blocking, handled in separate call
   }
 
   switch (cur) {
@@ -1181,32 +1263,19 @@ static void processInput() {
 
     // ── Network menu ──────────────────────────────────────────────────────────
     case SCR_NETWORK:
-      if (enc) { sel = (sel + enc + 3) % 3; dirty = true; }
+      if (enc) { sel = (sel + enc + 4) % 4; dirty = true; }
       if (btn == 1) {
-        if (sel == 0) { // WiFi scan
-          if (!wifiOK && !apMode) {
-            WiFi.mode(WIFI_STA);
-          }
-          startScan();
-          goTo(SCR_WIFI_SCAN);
-        } else if (sel == 1) { // OTA
-          if (!wifiOK) {
-            // Try to connect to known networks first
-            for (auto& net : KNOWN) {
-              drawWifiConn();
-              if (connectToNetwork(net.ssid, net.pass)) {
-                wifiOK = true; apMode = false; break;
-              }
-            }
-          }
-          if (!relLoaded) {
+        switch (sel) {
+          case 0: goTo(SCR_WIFI_SCAN); startScan(); break;
+          case 1:
+            waitForWifi(9000);
             goTo(SCR_OTA_LIST);
-            dirty = true; redraw();
+            redraw();
             fetchReleases(25);
-          }
-          goTo(SCR_OTA_LIST);
-        } else if (sel == 2) { // Web server
-          goTo(SCR_WEBSERVER);
+            needFull();
+            break;
+          case 2: goTo(SCR_WEBSERVER); break;
+          case 3: goTo(SCR_MAIN); break;
         }
       }
       if (btn == 2) goTo(SCR_MAIN);
@@ -1214,20 +1283,20 @@ static void processInput() {
 
     // ── WiFi scan list ────────────────────────────────────────────────────────
     case SCR_WIFI_SCAN: {
-      int total = scannedCnt + 1;
+      int total = scannedCnt + 1; // +[Back]
       if (enc) { sel = (sel + enc + total) % total; dirty = true; }
       if (btn == 1) {
         if (sel < scannedCnt) {
           kbSSID = scanned[sel].ssid;
           kbPass = "";
-          kbRow  = 0; kbCol = 0;
+          kbRow = 0; kbCol = 0;
           kbShift = false; kbNums = false;
           goTo(SCR_WIFI_KB);
         } else {
-          goTo(SCR_NETWORK);
+          goTo(SCR_NETWORK, 0);
         }
       }
-      if (btn == 2) goTo(SCR_NETWORK);
+      if (btn == 2) goTo(SCR_NETWORK, 0);
       break;
     }
 
@@ -1245,39 +1314,45 @@ static void processInput() {
       if (btn == 1) {
         char c = kbChar(kbRow, kbCol);
         switch ((uint8_t)c) {
-          case 0x7f: // DEL
+          case 0x7f:
             if (kbPass.length() > 0) kbPass.remove(kbPass.length() - 1);
             break;
-          case '\r': // OK — start connecting
-            goTo(SCR_WIFI_CONN);
-            drawWifiConn();
+          case '\r': { // OK — connect
+            tft.fillScreen(D_BG);
+            drawHeader("Connecting...");
+            tft.setTextFont(2);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextColor(D_FG, D_BG);
+            tft.drawString("Connecting to:", W / 2, BODY_Y + 22);
+            tft.setTextColor(D_CYAN, D_BG);
+            tft.drawString(kbSSID.c_str(), W / 2, BODY_Y + 48);
             if (connectToNetwork(kbSSID.c_str(), kbPass.c_str())) {
-              wifiOK = true; apMode = false;
+              wifiOK = true; staTrying = false;
               tft.setTextColor(D_GREEN, D_BG); tft.setTextFont(2);
               tft.setTextDatum(MC_DATUM);
               tft.drawString("Connected!", W / 2, BODY_Y + 90);
               delay(1200);
-              if (!webOn) { startWebServer(); }
-              goTo(SCR_NETWORK);
+              goTo(SCR_NETWORK, 0);
             } else {
               tft.setTextColor(D_RED, D_BG); tft.setTextFont(2);
               tft.setTextDatum(MC_DATUM);
-              tft.drawString("Failed — check password", W / 2, BODY_Y + 90);
+              tft.drawString("Failed - check password", W / 2, BODY_Y + 90);
               delay(2000);
               goTo(SCR_WIFI_KB);
             }
             return;
-          case '\x01': // SHIFT
+          }
+          case '\x01':
             if (kbNums) { kbNums = false; kbShift = false; }
             else kbShift = !kbShift;
             break;
-          case '\x02': // NUM mode
+          case '\x02':
             kbNums = !kbNums; kbShift = false;
             kbCol = min(kbCol, kbRowLen(kbRow) - 1);
             break;
           default:
             if (kbPass.length() < 63) kbPass += c;
-            kbShift = false; // auto-release shift after one char
+            kbShift = false;
             break;
         }
         dirty = true;
@@ -1292,24 +1367,23 @@ static void processInput() {
       if (btn == 1) {
         if (sel < relCnt) {
           downloadAndFlash(releases[sel].url, releases[sel].tag);
-          // Returns only on failure
           goTo(SCR_OTA_LIST);
         } else {
-          goTo(SCR_NETWORK);
+          goTo(SCR_NETWORK, 1);
         }
       }
-      if (btn == 2) goTo(SCR_NETWORK);
+      if (btn == 2) goTo(SCR_NETWORK, 1);
       break;
     }
 
-    // ── Web server toggle ──────────────────────────────────────────────────────
+    // ── Web server (2-item menu: toggle / back) ────────────────────────────────
     case SCR_WEBSERVER:
+      if (enc) { sel = (sel + enc + 2) % 2; dirty = true; }
       if (btn == 1) {
-        if (!webOn) { startWebServer(); }
-        else        { server.stop(); webOn = false; }
-        dirty = true;
+        if (sel == 0) { if (webOn) stopWebServer(); else startWebServer(); needFull(); }
+        else          { goTo(SCR_NETWORK, 2); }
       }
-      if (btn == 2) goTo(SCR_NETWORK);
+      if (btn == 2) goTo(SCR_NETWORK, 2);
       break;
 
     default: break;
@@ -1327,10 +1401,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println("{\"mode\":\"recovery\",\"fw\":2}");
 
-  // Power on LDO
   pinMode(PIN_PWR, OUTPUT); digitalWrite(PIN_PWR, HIGH); delay(50);
 
-  // Encoder + button
   pinMode(PIN_BTN,   INPUT_PULLUP);
   pinMode(PIN_ENC_A, INPUT_PULLUP);
   pinMode(PIN_ENC_B, INPUT_PULLUP);
@@ -1338,11 +1410,9 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_A), encISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_B), encISR, CHANGE);
 
-  // Backlight
   ledcAttach(PIN_LCD_BL, 16000, 8);
   ledcWrite(PIN_LCD_BL, 210);
 
-  // Display
   tft.init();
   tft.setRotation(3);
   uint8_t did3 = tft.readcommand8(ST7789_RDDID, 3);
@@ -1356,52 +1426,19 @@ void setup() {
   }
   tft.fillScreen(D_BG);
 
-  // Splash + boot decision
+  // Splash + boot decision (boots main firmware unless encoder held / boot-loop)
   splashAndDecide();
 
-  // We're in recovery UI — connect WiFi
-  tft.fillScreen(D_BG);
-  drawHeader("Recovery");
-  clearBody();
-  tft.setTextFont(2);
-  tft.setTextDatum(ML_DATUM);
-  tft.setTextColor(D_COMMENT, D_BG);
-
-  // Try known networks
-  for (const auto& net : KNOWN) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Trying %s...", net.ssid);
-    tft.setCursor(8, BODY_Y + 10);
-    tft.setTextColor(D_COMMENT, D_BG);
-    tft.setTextFont(2);
-    tft.print(buf);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(net.ssid, net.pass);
-    if (WiFi.waitForConnectResult(10000) == WL_CONNECTED) {
-      wifiOK = true;
-      Serial.printf("{\"wifi\":\"connected\",\"ssid\":\"%s\",\"ip\":\"%s\"}\n",
-        net.ssid, WiFi.localIP().toString().c_str());
-      break;
-    }
-    WiFi.disconnect(true); delay(200);
-  }
-
-  if (!wifiOK) {
-    apMode = true;
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    delay(300);
-    Serial.printf("{\"wifi\":\"ap\",\"ip\":\"%s\"}\n",
-      WiFi.softAPIP().toString().c_str());
-  }
-
-  // Always start web server
+  // Bring networking up in the background — AP is instant, STA connects async.
+  // No blocking "Trying..." screen: the menu shows immediately.
+  netInit();
   startWebServer();
 
-  dirty = true;
+  goTo(SCR_MAIN, 0);
 }
 
 void loop() {
+  netTick();
   processInput();
   if (dirty) redraw();
   if (webOn) server.handleClient();

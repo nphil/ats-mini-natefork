@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -44,13 +47,15 @@ import com.atsmini.remote.ui.theme.ThemeController
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
+    // No page scroll: fixed cards top and bottom, the variable presets list takes
+    // the remaining space and scrolls internally.
     Column(
-        modifier = modifier.fillMaxWidth().padding(14.dp).verticalScroll(rememberScrollState()),
+        modifier = modifier.fillMaxSize().padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         ConnectionCard()
         ThemeCard()
-        PresetsCard()
+        PresetsCard(Modifier.weight(1f))
         AboutCard()
     }
 }
@@ -106,7 +111,7 @@ private fun ThemeCard() {
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(6),
-            modifier = Modifier.fillMaxWidth().height(180.dp),
+            modifier = Modifier.fillMaxWidth().height(140.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -131,25 +136,42 @@ private fun ThemeCard() {
     }
 }
 
+// Built from a raw Card (not SectionCard) so the preset list can take weight(1f)
+// of the card height and scroll internally — keeping the Settings page fixed.
 @Composable
-private fun PresetsCard() {
+private fun PresetsCard(modifier: Modifier = Modifier) {
     val presets by RadioRepository.presets.collectAsStateWithLifecycle()
-    SectionCard(
-        title = "Presets",
-        trailing = { TextButton(onClick = { RadioRepository.send(Protocol.listPresets()) }) { Text("Refresh") } },
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        if (presets.isEmpty()) {
-            Text("No presets saved", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-        }
-        presets.forEach { p ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text(p.name, fontWeight = FontWeight.SemiBold)
-                    Text("${p.channelCount} channels", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Row {
-                    TextButton(onClick = { RadioRepository.send(Protocol.loadPreset(p.idx)) }) { Text("Load") }
-                    TextButton(onClick = { RadioRepository.send(Protocol.deletePreset(p.idx)) }) { Text("Delete") }
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Presets", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { RadioRepository.send(Protocol.listPresets()) }) { Text("Refresh") }
+            }
+            if (presets.isEmpty()) {
+                Text("No presets saved", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
+                presets.forEach { p ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column {
+                            Text(p.name, fontWeight = FontWeight.SemiBold)
+                            Text("${p.channelCount} channels", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Row {
+                            TextButton(onClick = { RadioRepository.send(Protocol.loadPreset(p.idx)) }) { Text("Load") }
+                            TextButton(onClick = { RadioRepository.send(Protocol.deletePreset(p.idx)) }) { Text("Delete") }
+                        }
+                    }
                 }
             }
         }
