@@ -7,9 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Bedtime
@@ -26,9 +27,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
@@ -114,19 +117,30 @@ private fun ControlsCard(status: RadioStatus) {
             DeltaPill("AGC", status.agc, "agc", Modifier.weight(1f))
         }
 
-        // Volume
+        // Volume — single draggable slider. While dragging we hold a local value so
+        // incoming status frames don't fight the thumb; on release we send the radio
+        // a single relative step equal to (target − current), which it clamps.
+        var dragging by remember { mutableStateOf(false) }
+        var localVol by remember { mutableFloatStateOf(status.volume.toFloat()) }
+        if (!dragging) localVol = status.volume.toFloat()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Vol", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
+            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Volume",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(
-                value = status.volume.toFloat(),
-                onValueChange = { },
-                onValueChangeFinished = { },
-                valueRange = 0f..63f,
-                modifier = Modifier.weight(1f),
-                enabled = false,
+                value = localVol,
+                onValueChange = { dragging = true; localVol = it },
+                onValueChangeFinished = {
+                    val target = localVol.roundToInt()
+                    val delta = target - status.volume
+                    if (delta != 0) { Haptics.light(view); RadioRepository.send(Protocol.volume(delta)) }
+                    dragging = false
+                },
+                valueRange = 0f..100f,
+                enabled = status.isConnected,
+                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
             )
-            TuneButton("−", Modifier.size(44.dp)) { Haptics.light(view); RadioRepository.send(Protocol.volume(-1)) }
-            TuneButton("+", Modifier.size(44.dp)) { Haptics.light(view); RadioRepository.send(Protocol.volume(1)) }
+            Text("${localVol.roundToInt()}", fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.width(32.dp))
         }
 
         // Sleep

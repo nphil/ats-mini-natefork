@@ -14,6 +14,7 @@ object GithubReleases {
         fun full() = assets.firstOrNull { it.name.endsWith("-ospi-full.bin") }
         fun flash() = assets.firstOrNull { it.name.endsWith("-ospi-flash.bin") }
         fun ota() = assets.firstOrNull { it.name.endsWith("-ospi-ota.bin") }
+        fun recovery() = assets.firstOrNull { it.name.endsWith("-ospi-recovery.bin") }
     }
 
     /** Returns up to [count] releases. The "latest" pre-release is first if present,
@@ -54,6 +55,18 @@ object GithubReleases {
 
     /** Latest non-prerelease firmware release (tag like vX.YY). */
     fun latestFirmware(): Firmware? = listFirmware(1).firstOrNull()
+
+    /**
+     * Download [asset], serving from the on-device cache when present (offline
+     * friendly) and storing fresh downloads for later. Reports 100% immediately
+     * on a cache hit.
+     */
+    fun downloadCached(asset: Asset, onProgress: (Int) -> Unit): ByteArray? {
+        FirmwareCache.read(asset.name)?.let { onProgress(100); return it }
+        val bytes = download(asset.url, onProgress) ?: return null
+        FirmwareCache.put(asset.name, bytes)
+        return bytes
+    }
 
     fun download(url: String, onProgress: (Int) -> Unit): ByteArray? {
         return runCatching {

@@ -72,9 +72,11 @@ private fun ConnectionCard() {
             Button(onClick = { Controllers.ble.startScan() }, enabled = !scanning, modifier = Modifier.weight(1f)) {
                 Text(if (scanning) "Scanning…" else "Scan BLE")
             }
-            OutlinedButton(onClick = { Controllers.ble.disconnect(); Controllers.usb.close() }, modifier = Modifier.weight(1f)) {
-                Text("Disconnect")
-            }
+            OutlinedButton(
+                onClick = { Controllers.ble.disconnect(); Controllers.usb.close() },
+                enabled = status.isConnected,
+                modifier = Modifier.weight(1f),
+            ) { Text("Disconnect") }
         }
         devices.forEach { dev ->
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))

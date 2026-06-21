@@ -4,6 +4,7 @@ import android.app.Application
 import com.atsmini.remote.ble.BleManager
 import com.atsmini.remote.data.RadioRepository
 import com.atsmini.remote.integration.RadioWidgetProvider
+import com.atsmini.remote.net.FirmwareCache
 import com.atsmini.remote.service.RadioLinkService
 import com.atsmini.remote.shizuku.ShizukuManager
 import com.atsmini.remote.ui.theme.ThemeController
@@ -35,6 +36,7 @@ class AtsApp : Application() {
         Controllers.init(this)
         ThemeController.init(this)
         ShizukuManager.init()
+        FirmwareCache.init(this)
 
         // Start the foreground link service on connect; refresh widgets on any change.
         var wasConnected = false
