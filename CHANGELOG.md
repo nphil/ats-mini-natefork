@@ -4,7 +4,18 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
-## 2.58 (2026-06-21)
+## 2.60 (2026-06-21)
+
+### Changed
+
+- **Release notes embed the changelog again, and versions are aligned.** Each firmware
+  release published by CI includes its matching `## X.YY` CHANGELOG section in the
+  GitHub release body (alongside the downloads table). The 2.58 and 2.59 entries were
+  renumbered to match the versions CI actually tagged (the changelog had drifted one
+  version behind `VER_APP`), and the already-published v2.58 / v2.59 release notes were
+  backfilled with their changelog sections.
+
+## 2.59 (2026-06-21)
 
 ### Changed
 
@@ -28,7 +39,7 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 - **Duplicate Wi-Fi networks removed from the scan list.** Mesh networks that broadcast
   the same SSID from multiple nodes are now de-duplicated, keeping the strongest signal.
 
-## 2.57 (2026-06-21)
+## 2.58 (2026-06-21)
 
 ### Changed
 
