@@ -1,0 +1,1 @@
+**CLAUDE.md release checklist added.** Every push to `main` now has a documented mandatory checklist (CHANGELOG fragment, firmware bins, Android APK, iOS IPA) that persists across sessions so no release can silently skip required assets.
