@@ -28,6 +28,44 @@ data class WaterfallMeta(val startFreq: Int, val step: Int, val pointCount: Int)
 
 data class Preset(val idx: Int, val name: String, val channelCount: Int)
 
+/** A selectable dimension: the device's option labels + its current index. */
+data class OptionList(val current: Int, val options: List<String>)
+
+/**
+ * Snapshot of the radio's selectable menus (mode/band/step/bandwidth/AGC),
+ * returned by the {"cmd":"opts"} query. Step and bandwidth lists depend on the
+ * current mode, so this is re-queried after a mode or band change.
+ */
+data class RadioOptions(
+    val mode: OptionList = OptionList(0, emptyList()),
+    val band: OptionList = OptionList(0, emptyList()),
+    val step: OptionList = OptionList(0, emptyList()),
+    val bw: OptionList = OptionList(0, emptyList()),
+    val agcCurrent: Int = 0,
+    val agcMax: Int = 0,
+) {
+    companion object {
+        private fun list(o: JSONObject?): OptionList {
+            if (o == null) return OptionList(0, emptyList())
+            val arr = o.optJSONArray("o")
+            val items = if (arr != null) List(arr.length()) { arr.optString(it) } else emptyList()
+            return OptionList(o.optInt("i", 0), items)
+        }
+
+        fun parse(msg: JSONObject): RadioOptions {
+            val agc = msg.optJSONObject("agc")
+            return RadioOptions(
+                mode = list(msg.optJSONObject("mode")),
+                band = list(msg.optJSONObject("band")),
+                step = list(msg.optJSONObject("step")),
+                bw = list(msg.optJSONObject("bw")),
+                agcCurrent = agc?.optInt("i", 0) ?: 0,
+                agcMax = agc?.optInt("max", 0) ?: 0,
+            )
+        }
+    }
+}
+
 /**
  * Immutable snapshot of everything the radio reports over the line protocol.
  * Mirrors the iOS RadioState model so behaviour matches across platforms.

@@ -122,6 +122,12 @@ const Step *getCurrentStep();
 const Bandwidth *getCurrentBandwidth();
 uint8_t getRDSMode();
 
+// Emit the selectable option lists (mode/band/step/bandwidth/AGC) + current
+// indices as a {"t":"opts",...} JSON object. Read-only; used by remote apps to
+// populate native pickers. Defined in Menu.cpp where the option tables live.
+class Stream;
+void remoteJsonOptions(Stream *stream);
+
 int getCurrentUTCOffset();
 int getTotalFmRegions();
 int      getTotalBleModes();

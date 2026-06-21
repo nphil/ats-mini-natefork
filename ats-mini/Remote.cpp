@@ -571,6 +571,14 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     return REMOTE_CHANGED;
   }
 
+  // ---- Selectable option lists (read-only) ----------------------------
+  // Mode/band/step/bandwidth/AGC names + current indices, for native pickers.
+  if(!strcmp(cmd, "opts"))
+  {
+    remoteJsonOptions(stream);
+    return REMOTE_CHANGED;
+  }
+
   // ---- Subscribe: periodic JSON status --------------------------------
   if(!strcmp(cmd, "sub"))
   {

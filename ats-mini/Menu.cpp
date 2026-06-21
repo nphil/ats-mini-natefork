@@ -645,6 +645,64 @@ const Bandwidth *getCurrentBandwidth()
   return(&bandwidths[currentMode][bands[bandIdx].bandwidthIdx > getLastBandwidth(currentMode) ? defaultBwIdx[currentMode] : bands[bandIdx].bandwidthIdx]);
 }
 
+// Emit selectable option lists + current indices for mode/band/step/bandwidth/AGC.
+// Read-only: it touches no radio state, so it is safe to call from the remote
+// command handler at any time. A remote app jumps directly to any option by
+// sending the existing band/mode/step/bw/agc delta = (targetIdx - currentIdx),
+// which wrap_range applies in a single step. Step/bandwidth lists depend on the
+// current mode, so apps re-query after a mode or band change.
+void remoteJsonOptions(Stream *stream)
+{
+  static char buf[1280];
+  int n = 0;
+  // Append guard: never advance n past the buffer (snprintf returns the length
+  // it *would* have written, which could exceed the remaining space).
+  #define OPTS_APP(...) do { \
+      if(n < (int)sizeof(buf)) { \
+        int _a = snprintf(buf + n, sizeof(buf) - n, __VA_ARGS__); \
+        n = (_a < 0) ? n : (n + _a > (int)sizeof(buf) ? (int)sizeof(buf) : n + _a); \
+      } } while(0)
+
+  OPTS_APP("{\"t\":\"opts\",");
+
+  // Modes
+  OPTS_APP("\"mode\":{\"i\":%u,\"o\":[", currentMode);
+  for(int i = 0; i <= LAST_ITEM(bandModeDesc); i++)
+    OPTS_APP("%s\"%s\"", i ? "," : "", bandModeDesc[i]);
+  OPTS_APP("]},");
+
+  // Bands
+  OPTS_APP("\"band\":{\"i\":%d,\"o\":[", bandIdx);
+  for(int i = 0; i <= LAST_ITEM(bands); i++)
+    OPTS_APP("%s\"%s\"", i ? "," : "", bands[i].bandName);
+  OPTS_APP("]},");
+
+  // Steps (depend on current mode)
+  int lastStep = getLastStep(currentMode);
+  uint8_t stepIdx = bands[bandIdx].currentStepIdx > lastStep ? defaultStepIdx[currentMode] : bands[bandIdx].currentStepIdx;
+  OPTS_APP("\"step\":{\"i\":%u,\"o\":[", stepIdx);
+  for(int i = 0; i <= lastStep; i++)
+    OPTS_APP("%s\"%s\"", i ? "," : "", steps[currentMode][i].desc);
+  OPTS_APP("]},");
+
+  // Bandwidths (depend on current mode)
+  int lastBw = getLastBandwidth(currentMode);
+  uint8_t bwIdx = bands[bandIdx].bandwidthIdx > lastBw ? defaultBwIdx[currentMode] : bands[bandIdx].bandwidthIdx;
+  OPTS_APP("\"bw\":{\"i\":%u,\"o\":[", bwIdx);
+  for(int i = 0; i <= lastBw; i++)
+    OPTS_APP("%s\"%s\"", i ? "," : "", bandwidths[currentMode][i].desc);
+  OPTS_APP("]},");
+
+  // AGC is a numeric range; max depends on mode (FM 27, SSB 1, AM 37).
+  int agcMax = currentMode == FM ? 27 : isSSB() ? 1 : 37;
+  OPTS_APP("\"agc\":{\"i\":%d,\"max\":%d}}", agcIdx, agcMax);
+
+  #undef OPTS_APP
+
+  if(n > 0 && n < (int)sizeof(buf) - 2) { buf[n++] = '\r'; buf[n++] = '\n'; }
+  stream->write((uint8_t*)buf, n);
+}
+
 static void setBandwidth()
 {
   uint8_t idx = getCurrentBandwidth()->idx;

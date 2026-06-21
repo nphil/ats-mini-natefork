@@ -34,6 +34,10 @@ object RadioRepository {
     private val _presets = MutableStateFlow<List<Preset>>(emptyList())
     val presets: StateFlow<List<Preset>> = _presets.asStateFlow()
 
+    /** Selectable menu options (mode/band/step/bw/AGC), populated by [requestOptions]. */
+    private val _options = MutableStateFlow<RadioOptions?>(null)
+    val options: StateFlow<RadioOptions?> = _options.asStateFlow()
+
     /** Raw console text (USB serial console / boot+panic log capture). */
     private val _console = MutableStateFlow("")
     val console: StateFlow<String> = _console.asStateFlow()
@@ -50,12 +54,17 @@ object RadioRepository {
         // Bring up the live status stream + presets on connect.
         send(Protocol.subscribe(250)) // floor interval; firmware sends only on change or 2 s keepalive
         send(Protocol.listPresets())
+        send(Protocol.options())
         send(Protocol.setTimeNow())
     }
+
+    /** Ask the radio to (re)send its selectable menu option lists. */
+    fun requestOptions() = send(Protocol.options())
 
     fun detachTransport() {
         sender = null
         rxBuffer.setLength(0)
+        _options.value = null
         _status.update { it.copy(transport = Transport.NONE, connectionStatus = "Disconnected") }
         log("Disconnected")
     }
@@ -105,6 +114,7 @@ object RadioRepository {
     private fun handle(msg: JSONObject) {
         when (msg.optString("t")) {
             "s" -> _status.update { RadioStatus.applyStatus(it, msg) }
+            "opts" -> _options.value = RadioOptions.parse(msg)
             "scan" -> handleScan(msg)
             "scan_prog" -> _scanProgress.value = msg.optDouble("pct", 0.0)
             "wf" -> handleWaterfall(msg)

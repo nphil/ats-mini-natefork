@@ -13,6 +13,7 @@ object Protocol {
 
     fun subscribe(ms: Int) = obj("cmd" to "sub", "ms" to ms)
     fun status() = obj("cmd" to "status")
+    fun options() = obj("cmd" to "opts")
 
     fun frequency(freq: Int) = obj("cmd" to "freq", "val" to freq)
     fun delta(cmd: String, d: Int) = obj("cmd" to cmd, "d" to d)

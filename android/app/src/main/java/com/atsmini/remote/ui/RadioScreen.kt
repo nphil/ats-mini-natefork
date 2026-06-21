@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atsmini.remote.data.Protocol
+import com.atsmini.remote.data.RadioOptions
 import com.atsmini.remote.data.RadioRepository
 import com.atsmini.remote.data.RadioStatus
 import com.atsmini.remote.ui.components.Haptics
@@ -97,6 +98,7 @@ private fun FrequencyCard(status: RadioStatus) {
 @Composable
 private fun ControlsCard(status: RadioStatus) {
     val view = LocalView.current
+    val opts by RadioRepository.options.collectAsStateWithLifecycle()
     SectionCard(title = "Tuning") {
         // Big tune / seek row
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -106,15 +108,15 @@ private fun ControlsCard(status: RadioStatus) {
             TuneButton("▷▷", Modifier.weight(1f)) { Haptics.medium(view); RadioRepository.send(Protocol.seek(1)) }
         }
 
-        // Compact menu pills (Band / Mode / Step / BW / AGC)
+        // Menu pickers (Band / Mode / Step / BW / AGC) populated from the device.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DeltaPill("Band", status.bandName, "band", Modifier.weight(1f))
-            DeltaPill("Mode", status.modeName, "mode", Modifier.weight(1f))
-            DeltaPill("Step", status.stepSize, "step", Modifier.weight(1f))
+            MenuPicker("Band", status.bandName, Dim.BAND, opts, status, Modifier.weight(1f))
+            MenuPicker("Mode", status.modeName, Dim.MODE, opts, status, Modifier.weight(1f))
+            MenuPicker("Step", status.stepSize, Dim.STEP, opts, status, Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DeltaPill("BW", status.bandwidth, "bw", Modifier.weight(1f))
-            DeltaPill("AGC", status.agc, "agc", Modifier.weight(1f))
+            MenuPicker("BW", status.bandwidth, Dim.BW, opts, status, Modifier.weight(1f))
+            MenuPicker("AGC", status.agc, Dim.AGC, opts, status, Modifier.weight(1f))
         }
 
         // Volume — single draggable slider. While dragging we hold a local value so
@@ -154,13 +156,40 @@ private fun ControlsCard(status: RadioStatus) {
     }
 }
 
+/** A selectable radio dimension and the delta command that changes it. */
+private enum class Dim(val cmd: String) { BAND("band"), MODE("mode"), STEP("step"), BW("bw"), AGC("agc") }
+
+/** Resolve the option labels for [dim] from the device options snapshot. */
+private fun dimOptions(dim: Dim, opts: RadioOptions?): List<String> = when (dim) {
+    Dim.BAND -> opts?.band?.options ?: emptyList()
+    Dim.MODE -> opts?.mode?.options ?: emptyList()
+    Dim.STEP -> opts?.step?.options ?: emptyList()
+    Dim.BW -> opts?.bw?.options ?: emptyList()
+    Dim.AGC -> opts?.let { (0..it.agcMax).map { n -> n.toString() } } ?: emptyList()
+}
+
+/**
+ * Compact menu chip that opens a dropdown of the real radio options. Selecting an
+ * item jumps the radio there by sending a single relative step = (target − current);
+ * the current index is read from the live status value so it never drifts. Falls
+ * back to up/down stepping until the option list has arrived (or if the live value
+ * can't be matched). Options are fetched on connect and re-fetched after a band or
+ * mode change, so this adds no steady-state traffic or per-frame work.
+ */
 @Composable
-private fun DeltaPill(label: String, value: String, cmd: String, modifier: Modifier = Modifier) {
+private fun MenuPicker(
+    label: String, value: String, dim: Dim, opts: RadioOptions?, status: RadioStatus,
+    modifier: Modifier = Modifier,
+) {
     var expanded by remember { mutableStateOf(false) }
     val view = LocalView.current
+    val list = dimOptions(dim, opts)
+    val currentIdx = if (dim == Dim.AGC) value.toIntOrNull() ?: -1 else list.indexOf(value)
+
     Box(modifier) {
         AssistChip(
-            onClick = { expanded = true },
+            onClick = { if (opts == null) RadioRepository.requestOptions(); expanded = true },
+            enabled = status.isConnected,
             label = {
                 Column {
                     Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -170,16 +199,40 @@ private fun DeltaPill(label: String, value: String, cmd: String, modifier: Modif
             modifier = Modifier.fillMaxWidth(),
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("$label up") },
-                leadingIcon = { Icon(Icons.Filled.KeyboardArrowUp, null) },
-                onClick = { Haptics.light(view); RadioRepository.send(Protocol.delta(cmd, 1)); expanded = false },
-            )
-            DropdownMenuItem(
-                text = { Text("$label down") },
-                leadingIcon = { Icon(Icons.Filled.KeyboardArrowDown, null) },
-                onClick = { Haptics.light(view); RadioRepository.send(Protocol.delta(cmd, -1)); expanded = false },
-            )
+            if (list.isEmpty() || currentIdx < 0) {
+                // Fallback: relative stepping until options are known / value matches.
+                DropdownMenuItem(
+                    text = { Text("$label up") },
+                    leadingIcon = { Icon(Icons.Filled.KeyboardArrowUp, null) },
+                    onClick = { Haptics.light(view); RadioRepository.send(Protocol.delta(dim.cmd, 1)); expanded = false },
+                )
+                DropdownMenuItem(
+                    text = { Text("$label down") },
+                    leadingIcon = { Icon(Icons.Filled.KeyboardArrowDown, null) },
+                    onClick = { Haptics.light(view); RadioRepository.send(Protocol.delta(dim.cmd, -1)); expanded = false },
+                )
+            } else {
+                list.forEachIndexed { idx, name ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(name, fontWeight = if (idx == currentIdx) FontWeight.Bold else FontWeight.Normal,
+                                color = if (idx == currentIdx) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        },
+                        onClick = {
+                            expanded = false
+                            // FM band is mode-locked: the radio ignores switching into/out of FM.
+                            if (dim == Dim.MODE && (name == "FM" || status.isFM)) return@DropdownMenuItem
+                            val delta = idx - currentIdx
+                            if (delta != 0) {
+                                Haptics.light(view)
+                                RadioRepository.send(Protocol.delta(dim.cmd, delta))
+                                // Step/BW lists depend on band & mode — refresh after a change.
+                                if (dim == Dim.BAND || dim == Dim.MODE) RadioRepository.requestOptions()
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }
