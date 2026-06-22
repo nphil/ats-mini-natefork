@@ -11,10 +11,20 @@ can also be flashed via the **ROM bootloader** (esptool-style), which now auto-e
 mode over the ESP32-S3's native USB-Serial/JTAG using esptool's USB-JTAG reset sequence (BOOT+RESET
 still works as a manual fallback) — so you can flash from any state, including a bricked device.
 Note: **Live** USB flashing requires firmware v2.66+ already on the radio; for older firmware use
-Wi-Fi OTA or the Bootloader method once to get there. **Live** serial flashing handles Firmware & Recovery while
-the radio runs (in normal firmware, or Firmware while in recovery). Image-kind guards block
-mismatched flashes (e.g. an `ota.bin` selected for a bootloader Full, or a non-recovery image
-for Recovery). The serial-OTA client now understands both the main and recovery firmware reply
-formats, so live Firmware updates work whether the radio is in normal or recovery mode. Wi-Fi
-OTA on the same network is hardened with smaller flushed chunks and up to 3 retries to survive
-transient "broken pipe" stalls, plus cleartext-HTTP support for local radio IPs.
+Wi-Fi OTA or the Bootloader method once to get there.
+
+**Live recovery update while already in recovery** is now supported via a power-loss-safe
+two-stage self-migration: the recovery firmware receives the new image into the spare OTA slot
+(stage 1, CRC-checked), reboots into it, then erases and copies it down to the factory partition
+(stage 2), re-verifying by reading the factory partition back. The factory partition is only made
+bootable again *after* that read-back CRC matches, so an interrupted copy simply re-runs from the
+spare slot on the next boot — it can never leave a half-written, unbootable recovery.
+
+Every flash path is now integrity-checked end-to-end: serial OTA verifies a CRC32 of the
+transfer plus `esp_ota`'s SHA-256 image validation; in-place recovery and the migration also
+read the written partition back and CRC-verify it; the ROM-bootloader path keeps esptool's
+per-block checksums. Image-kind guards block mismatched flashes (e.g. an `ota.bin` selected for a
+bootloader Full, or a non-recovery image for Recovery). The serial-OTA client understands both
+the main and recovery firmware reply formats. Wi-Fi OTA on the same network is hardened with
+smaller flushed chunks and up to 3 retries to survive transient "broken pipe" stalls, plus
+cleartext-HTTP support for local radio IPs.

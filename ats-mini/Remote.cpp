@@ -21,6 +21,37 @@ static SerialOtaSt sOtaState = SOTA_IDLE;
 static size_t sOtaExpected = 0;
 static size_t sOtaWritten  = 0;
 static const esp_partition_t *sRecPart = nullptr;
+static uint32_t sOtaCrcRun = 0xFFFFFFFFu;   // running CRC32 of received bytes
+static uint32_t sOtaCrcExp = 0;             // expected CRC32 (0 = skip check)
+
+// CRC32 (zlib / IEEE-802.3, matches java.util.zip.CRC32). Running form: start at
+// 0xFFFFFFFF, accumulate, final result = state ^ 0xFFFFFFFF.
+static uint32_t crc32Run(uint32_t crc, const uint8_t *data, size_t len)
+{
+  for(size_t i = 0; i < len; i++)
+  {
+    crc ^= data[i];
+    for(int k = 0; k < 8; k++)
+      crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+  }
+  return crc;
+}
+
+// CRC32 of the first [size] bytes of a partition (for read-back verification).
+static uint32_t partCrc32(const esp_partition_t *p, size_t size)
+{
+  static uint8_t cbuf[1024];
+  uint32_t crc = 0xFFFFFFFFu;
+  size_t off = 0;
+  while(off < size)
+  {
+    size_t n = min((size_t)sizeof(cbuf), size - off);
+    if(esp_partition_read(p, off, cbuf, n) != ESP_OK) return 0;
+    crc = crc32Run(crc, cbuf, n);
+    off += n;
+  }
+  return crc ^ 0xFFFFFFFFu;
+}
 
 // Drain incoming serial bytes into the active OTA sink. Called every loop while
 // an OTA is in progress, so it takes over the serial input until complete.
@@ -47,6 +78,7 @@ static void serialOtaTick(Stream *stream)
       sOtaState = SOTA_IDLE;
       return;
     }
+    sOtaCrcRun = crc32Run(sOtaCrcRun, buf, n);
     sOtaWritten += n;
     if((sOtaWritten % 32768) < (size_t)n)
       stream->printf("{\"t\":\"ota\",\"progress\":%u,\"total\":%u}\r\n",
@@ -55,13 +87,33 @@ static void serialOtaTick(Stream *stream)
 
   if(sOtaWritten >= sOtaExpected)
   {
-    bool ok;
-    if(sOtaState == SOTA_FW)
-      ok = Update.end(true);   // verifies image + sets boot partition
+    // 1) Verify the bytes we received match the app-supplied CRC32.
+    uint32_t crc = sOtaCrcRun ^ 0xFFFFFFFFu;
+    bool crcOk = (sOtaCrcExp == 0 || crc == sOtaCrcExp);
+
+    bool ok = false;
+    const char *err = "";
+    if(!crcOk)
+    {
+      if(sOtaState == SOTA_FW) Update.abort();
+      err = "crc";
+    }
+    else if(sOtaState == SOTA_FW)
+    {
+      ok = Update.end(true);          // SHA-verifies image + sets boot partition
+      if(!ok) err = "verify";
+    }
+    else // SOTA_REC: read the factory partition back and CRC-verify the install
+    {
+      ok = (partCrc32(sRecPart, sOtaExpected) == crc);
+      if(!ok) err = "readback";
+    }
+
+    if(ok)
+      stream->printf("{\"t\":\"ota\",\"ok\":true,\"bytes\":%u}\r\n", (unsigned)sOtaWritten);
     else
-      ok = true;               // recovery raw write complete
-    stream->printf("{\"t\":\"ota\",\"ok\":%s,\"bytes\":%u}\r\n",
-                   ok ? "true" : "false", (unsigned)sOtaWritten);
+      stream->printf("{\"t\":\"ota\",\"ok\":false,\"err\":\"%s\"}\r\n", err);
+
     sOtaState = SOTA_IDLE;
     if(ok) { stream->flush(); delay(600); esp_restart(); }
   }
@@ -646,12 +698,14 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
   // over serial and writes it to the inactive OTA partition, then reboots.
   if(!strcmp(cmd, "ota_begin"))
   {
-    long sz = 0;
+    long sz = 0, crc = 0;
     if(!jsonInt(json, "size", &sz) || sz <= 0)
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"size\"}\r\n"); return REMOTE_CHANGED; }
+    jsonInt(json, "crc", &crc);
     if(!Update.begin((size_t)sz, U_FLASH))
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"begin\"}\r\n"); return REMOTE_CHANGED; }
     sOtaState = SOTA_FW; sOtaExpected = (size_t)sz; sOtaWritten = 0;
+    sOtaCrcRun = 0xFFFFFFFFu; sOtaCrcExp = (uint32_t)crc;
     stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld}\r\n", sz);
     return REMOTE_CHANGED;
   }
@@ -659,16 +713,18 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
   // ---- Serial OTA: recovery image → factory partition (in place) -------
   if(!strcmp(cmd, "rec_begin"))
   {
-    long sz = 0;
+    long sz = 0, crc = 0;
     const esp_partition_t *p = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
     if(!jsonInt(json, "size", &sz) || sz <= 0 || !p || (size_t)sz > p->size)
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"recsize\"}\r\n"); return REMOTE_CHANGED; }
+    jsonInt(json, "crc", &crc);
     size_t eraseSz = ((size_t)sz + 0xFFF) & ~(size_t)0xFFF;
     if(eraseSz > p->size) eraseSz = p->size;
     if(esp_partition_erase_range(p, 0, eraseSz) != ESP_OK)
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"erase\"}\r\n"); return REMOTE_CHANGED; }
     sRecPart = p; sOtaState = SOTA_REC; sOtaExpected = (size_t)sz; sOtaWritten = 0;
+    sOtaCrcRun = 0xFFFFFFFFu; sOtaCrcExp = (uint32_t)crc;
     stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld,\"rec\":true}\r\n", sz);
     return REMOTE_CHANGED;
   }

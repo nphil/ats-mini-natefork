@@ -30,9 +30,13 @@ class SerialOta(private val port: UsbSerialPort) {
      */
     fun flash(image: ByteArray, recovery: Boolean, progress: Progress): Boolean {
         drain()
+        // CRC32 (zlib/IEEE) of the image, sent as a SIGNED 32-bit int so the
+        // firmware's atol-based parser round-trips it (the unsigned form would
+        // overflow). The firmware verifies it before committing the flash.
+        val crc = java.util.zip.CRC32().apply { update(image) }.value.toInt()
         val cmd = if (recovery) "rec_begin" else "ota_begin"
         progress.status("Requesting OTA slot from firmware…")
-        if (!writeLine("{\"cmd\":\"$cmd\",\"size\":${image.size}}")) {
+        if (!writeLine("{\"cmd\":\"$cmd\",\"size\":${image.size},\"crc\":$crc}")) {
             progress.status("USB write failed — is the cable connected?")
             return false
         }
@@ -77,7 +81,17 @@ class SerialOta(private val port: UsbSerialPort) {
             return false
         }
         val ok = done.contains("\"ok\":true")
-        progress.status(if (ok) "Done — radio rebooting into new firmware" else "Flash failed: $done")
+        progress.status(
+            when {
+                !ok -> "Flash failed: $done"
+                // Recovery self-migration: the radio reboots and installs to the
+                // factory partition on its own, showing progress on its screen.
+                done.contains("\"stage\":1") ->
+                    "Recovery received & verified — the radio is rebooting to install it. " +
+                    "Watch the radio screen; it'll reboot a couple of times. Don't unplug."
+                else -> "Done — radio rebooting into new firmware"
+            }
+        )
         return ok
     }
 

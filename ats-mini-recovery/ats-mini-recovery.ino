@@ -226,10 +226,52 @@ static bool otaFinish() {
 }
 static void otaAbortAll() { if (otaOn) { esp_ota_abort(otaH); otaOn = false; } }
 
+// ── CRC32 (zlib / IEEE-802.3, matches java.util.zip.CRC32) ─────────────────────
+// Running form: start state 0xFFFFFFFF, accumulate, final result = state ^ 0xFFFFFFFF.
+static uint32_t crc32Run(uint32_t crc, const uint8_t* data, size_t len) {
+  for (size_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (int k = 0; k < 8; k++)
+      crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+  }
+  return crc;
+}
+
+// CRC32 of the first [size] bytes of a partition.
+static uint32_t partCrc32(const esp_partition_t* p, size_t size) {
+  static uint8_t cbuf[1024];
+  uint32_t crc = 0xFFFFFFFFu;
+  size_t off = 0;
+  while (off < size) {
+    size_t n = min((size_t)sizeof(cbuf), size - off);
+    if (esp_partition_read(p, off, cbuf, n) != ESP_OK) return 0;
+    crc = crc32Run(crc, cbuf, n);
+    off += n;
+  }
+  return crc ^ 0xFFFFFFFFu;
+}
+
+static const esp_partition_t* getOta1() {
+  return esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, nullptr);
+}
+static const esp_partition_t* getFactory() {
+  return esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
+}
+
 // ── Serial OTA ────────────────────────────────────────────────────────────────
-enum SerialSt { SS_IDLE, SS_OTA };
+// SS_OTA  → app firmware into ota_0 (main app)
+// SS_REC  → new recovery image into ota_1 (stage 1 of self-migration to factory)
+enum SerialSt { SS_IDLE, SS_OTA, SS_REC };
 static SerialSt sst = SS_IDLE;
 static size_t sOtaExp = 0;
+
+// Stage-1 (receive new recovery into ota_1) state.
+static esp_ota_handle_t       recH = 0;
+static const esp_partition_t* recPart = nullptr;
+static size_t   recExp = 0, recWritten = 0;
+static uint32_t recCrcRun = 0xFFFFFFFFu;   // running CRC of received bytes
+static uint32_t recCrcExp = 0;             // expected CRC (from app); 0 = skip check
+static bool     recOn = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Redraw bookkeeping
@@ -412,7 +454,120 @@ static void renderList(const char* title, int total,
 // Splash screen
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Set true when the factory partition is known to be damaged and a repair could
+// not complete — recovery then refuses to hand off to the main app (which would
+// erase otadata and leave the bootloader trying a broken factory → brick).
+static bool gFacBad = false;
+
+// Simple full-screen migration progress (own drawing; runs before the menu).
+static void drawMig(const char* msg, int pct, uint16_t color) {
+  tft.fillScreen(D_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(D_CYAN, D_BG); tft.setTextFont(2);
+  tft.drawString("Updating Recovery", W / 2, 40);
+  tft.setTextColor(color, D_BG); tft.setTextFont(2);
+  tft.drawString(msg, W / 2, 80);
+  if (pct >= 0) {
+    int bw = W - 24;
+    tft.drawRect(12, 110, bw, 16, D_PURPLE);
+    tft.fillRect(13, 111, (int)((uint64_t)pct * (bw - 2) / 100), 14, D_GREEN);
+  }
+}
+
+// Stage 2 of recovery self-migration. Runs at boot when a migration is pending.
+// Power-loss safe: factory boot is only re-enabled (otadata erased) AFTER the
+// factory copy is CRC-verified, so an interrupted copy simply re-runs from ota_1.
+static void recoveryMigrationStage2() {
+  Preferences p; p.begin("recovery", false, "settings");
+  uint8_t  pend    = p.getUChar("migPend", 0);
+  uint32_t size    = p.getULong("migSize", 0);
+  uint32_t expCrc  = p.getULong("migCrc", 0);
+  uint8_t  failCnt = p.getUChar("migFail", 0);
+  p.end();
+  if (!pend) return;
+
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  const esp_partition_t* fac = getFactory();
+  const esp_partition_t* o1  = getOta1();
+  if (!fac || !o1) return;
+
+  // If we're running from factory with a pending flag, the install already
+  // completed (or was never needed) — just clear the flag.
+  if (running == fac) {
+    Preferences q; q.begin("recovery", false, "settings"); q.putUChar("migPend", 0); q.end();
+    return;
+  }
+  // Stage 2 only runs from the freshly-received recovery in ota_1.
+  if (running != o1) return;
+
+  // 1) Re-verify the staged image in ota_1 before touching factory.
+  drawMig("Verifying image...", -1, D_FG);
+  if (size == 0 || size > fac->size || partCrc32(o1, size) != expCrc) {
+    drawMig("Image check failed", -1, D_RED);
+    // Factory is still intact (untouched). Abandon the migration safely:
+    // clear pending and erase otadata so the (good) factory boots next.
+    const esp_partition_t* otad = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+    if (otad) esp_partition_erase_range(otad, 0, otad->size);
+    Preferences q; q.begin("recovery", false, "settings");
+    q.putUChar("migPend", 0); q.end();
+    delay(2500); esp_restart();
+  }
+
+  // 2) Erase + copy ota_1 → factory, then read-back CRC-verify. 3 in-boot tries.
+  bool ok = false;
+  for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+    drawMig("Installing...", 0, D_FG);
+    if (esp_partition_erase_range(fac, 0, ((size_t)size + 0xFFF) & ~(size_t)0xFFF) != ESP_OK)
+      continue;
+    static uint8_t mbuf[1024];
+    size_t off = 0; bool werr = false;
+    while (off < size) {
+      size_t n = min((size_t)sizeof(mbuf), (size_t)size - off);
+      if (esp_partition_read(o1, off, mbuf, n) != ESP_OK)  { werr = true; break; }
+      if (esp_partition_write(fac, off, mbuf, n) != ESP_OK) { werr = true; break; }
+      off += n;
+      if ((off % 65536) < n) drawMig("Installing...", (int)(off * 100 / size), D_FG);
+    }
+    if (werr) continue;
+    drawMig("Verifying install...", 100, D_FG);
+    ok = (partCrc32(fac, size) == expCrc);
+  }
+
+  if (ok) {
+    // Factory verified good. Now (and only now) make it bootable: erasing otadata
+    // makes the bootloader select factory. Clear the pending flag last.
+    const esp_partition_t* otad = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+    if (otad) esp_partition_erase_range(otad, 0, otad->size);
+    Preferences q; q.begin("recovery", false, "settings");
+    q.putUChar("migPend", 0); q.putInt("bootcount", 0); q.end();
+    drawMig("Recovery updated!", 100, D_GREEN);
+    delay(1200); esp_restart();
+  }
+
+  // Copy failed this boot. otadata still points at ota_1 (set in stage 1), so a
+  // power cycle safely re-runs stage 2 — never boots the half-written factory.
+  failCnt++;
+  Preferences q; q.begin("recovery", false, "settings"); q.putUChar("migFail", failCnt); q.end();
+  if (failCnt < 5) {
+    drawMig("Install retry...", -1, D_YELLOW);
+    delay(1500); esp_restart();
+  }
+  // Persistent failure (very rare): stay on the intact new recovery in ota_1 and
+  // refuse to hand off to main (factory is damaged). User repairs via USB bootloader.
+  gFacBad = true;
+  Preferences r; r.begin("recovery", false, "settings");
+  r.putUChar("migPend", 0); r.end();
+  esp_ota_set_boot_partition(o1);   // keep booting this (good) recovery
+  drawMig("Repair failed - use USB", -1, D_RED);
+  delay(3500);
+}
+
 static bool splashAndDecide() {
+  // If factory is known-damaged, never auto-forward to the main app.
+  if (gFacBad) return true;
+
   tft.fillScreen(D_BG);
 
   tft.setTextColor(D_CYAN, D_BG);
@@ -1280,7 +1435,27 @@ static void handleSerialCmd(const char* line) {
     if (!otaBegin(sz)) { Serial.println("{\"ok\":false,\"err\":\"begin\"}"); return; }
     sst = SS_OTA; sOtaExp = sz;
     Serial.printf("{\"ok\":true,\"size\":%u}\n", (unsigned)sz);
+  } else if (!strncmp(v, "rec_begin", 9)) {
+    // Stage 1: receive a new recovery image into ota_1. The actual factory
+    // install (stage 2) happens after reboot, running the new recovery from
+    // ota_1 — we can't rewrite factory while executing from it.
+    const char* sk = strstr(line, "\"size\":");
+    size_t sz = sk ? (size_t)atol(sk + 7) : 0;
+    const char* ck = strstr(line, "\"crc\":");
+    uint32_t crc = ck ? (uint32_t)strtoul(ck + 6, nullptr, 10) : 0;
+    recPart = getOta1();
+    const esp_partition_t* fac = getFactory();
+    if (!sz || !recPart || !fac || sz > recPart->size || sz > fac->size) {
+      Serial.println("{\"ok\":false,\"err\":\"recsize\"}"); return;
+    }
+    if (esp_ota_begin(recPart, sz, &recH) != ESP_OK) {
+      Serial.println("{\"ok\":false,\"err\":\"begin\"}"); return;
+    }
+    recExp = sz; recWritten = 0; recCrcRun = 0xFFFFFFFFu; recCrcExp = crc; recOn = true;
+    sst = SS_REC;
+    Serial.printf("{\"ok\":true,\"size\":%u,\"rec\":true}\n", (unsigned)sz);
   } else if (!strncmp(v, "ota_abort", 9)) {
+    if (recOn) { esp_ota_abort(recH); recOn = false; }
     otaAbortAll(); sst = SS_IDLE; Serial.println("{\"ok\":true}");
   } else if (!strncmp(v, "status", 6)) {
     Serial.printf("{\"mode\":\"recovery\",\"wifi\":\"%s\",\"ip\":\"%s\"}\n",
@@ -1306,6 +1481,42 @@ static void handleSerial() {
       bool ok = otaFinish(); sst = SS_IDLE;
       Serial.printf("{\"ok\":%s,\"bytes\":%u}\n", ok ? "true":"false", (unsigned)otaWritten);
       if (ok) { delay(1000); esp_restart(); }
+    }
+  } else if (sst == SS_REC) {
+    static uint8_t rbuf[1024];
+    while (Serial.available() && recWritten < recExp) {
+      size_t want = min((size_t)Serial.available(), min(sizeof(rbuf), recExp - recWritten));
+      int n = Serial.readBytes(rbuf, want); if (n <= 0) break;
+      if (!recOn || esp_ota_write(recH, rbuf, n) != ESP_OK) {
+        if (recOn) { esp_ota_abort(recH); recOn = false; }
+        sst = SS_IDLE; Serial.println("{\"ok\":false,\"err\":\"write\"}"); return;
+      }
+      recCrcRun = crc32Run(recCrcRun, rbuf, n);
+      recWritten += n;
+      if ((recWritten % 32768) < (size_t)n)
+        Serial.printf("{\"progress\":%u,\"total\":%u}\n", (unsigned)recWritten, (unsigned)recExp);
+    }
+    if (recWritten >= recExp) {
+      sst = SS_IDLE; recOn = false;
+      uint32_t crc = recCrcRun ^ 0xFFFFFFFFu;
+      bool crcOk = (recCrcExp == 0 || crc == recCrcExp);
+      bool endOk = (esp_ota_end(recH) == ESP_OK);
+      if (!crcOk || !endOk) {
+        Serial.printf("{\"ok\":false,\"err\":\"%s\"}\n", !crcOk ? "crc" : "verify");
+        return;   // factory untouched; nothing to roll back
+      }
+      // Record the pending migration and boot ota_1 so stage 2 can install it.
+      Preferences p; p.begin("recovery", false, "settings");
+      p.putUChar("migPend", 1);
+      p.putULong("migSize", (uint32_t)recExp);
+      p.putULong("migCrc",  crc);
+      p.putUChar("migFail", 0);
+      p.end();
+      if (esp_ota_set_boot_partition(recPart) != ESP_OK) {
+        Serial.println("{\"ok\":false,\"err\":\"setboot\"}"); return;
+      }
+      Serial.printf("{\"ok\":true,\"bytes\":%u,\"rec\":true,\"stage\":1}\n", (unsigned)recWritten);
+      delay(800); esp_restart();
     }
   } else {
     static char lbuf[256]; static int llen = 0;
@@ -1333,6 +1544,18 @@ static void eraseSettings() {
 }
 
 static void bootMain() {
+  // Refuse to hand off to main while the factory partition is damaged — main
+  // erases otadata on boot, which would leave the bootloader trying a broken
+  // factory next cold boot (brick). Repair recovery via USB first.
+  if (gFacBad) {
+    tft.fillScreen(D_BG);
+    tft.setTextColor(D_RED, D_BG); tft.setTextFont(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("Recovery damaged", W / 2, H / 2 - 12);
+    tft.drawString("Flash via USB bootloader", W / 2, H / 2 + 12);
+    delay(3000);
+    return;
+  }
   const esp_partition_t* p = getOta0();
   if (p && esp_ota_set_boot_partition(p) == ESP_OK) {
     tft.fillScreen(D_BG);
@@ -1580,6 +1803,10 @@ void setup() {
     tft.writecommand(0x55); tft.writedata(0xB1);
   }
   tft.fillScreen(D_BG);
+
+  // Install a pending recovery update (stage 2 of self-migration) before anything
+  // else — this reboots when done, so it never falls through to normal boot.
+  recoveryMigrationStage2();
 
   // Splash + boot decision (boots main firmware unless encoder held / boot-loop)
   splashAndDecide();

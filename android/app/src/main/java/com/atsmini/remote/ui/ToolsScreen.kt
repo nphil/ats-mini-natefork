@@ -396,8 +396,9 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
                 "Connect the radio (Device → Connect) and make sure it's powered on and running.",
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
             if (kind == FlashKind.RECOVERY) Text(
-                "Live recovery flashing works while the radio runs normal firmware. If it's " +
-                "already in recovery, use the Bootloader method instead.",
+                "Works whether the radio runs normal firmware or is already in recovery. " +
+                "In recovery mode it stages the image (CRC-checked), reboots, and installs " +
+                "to the factory partition on its own — watch the radio screen; don't unplug.",
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             Text("Put the radio in download mode first: hold BOOT, tap RESET, release BOOT. " +
