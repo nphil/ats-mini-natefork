@@ -78,18 +78,70 @@ OPI PSRAM uses the GPIOs QIO needs → garbage bootloader read → **hangs `ets_
 
 **Entry:** Press encoder during 2-second splash countdown, or auto-enter on boot-loop (3 fails).
 
-**Partition layout** (identical `partitions.csv` in both sketch dirs):
+**Partition layout** (identical `partitions.csv` in both sketch dirs — verify against the file, sizes below are exact):
 
-| Partition | Address | Size | Role |
-|-----------|---------|------|------|
-| factory | 0x10000 | 1.5 MB | recovery (never OTA'd) |
-| ota_0 | 0x190000 | 2.75 MB | main app |
-| ota_1 | 0x450000 | 1.75 MB | OTA target |
-| littlefs | 0x600000 | 1.875 MB | user data |
+| Partition | Type | Address | Size | Role |
+|-----------|------|---------|------|------|
+| nvs | nvs | 0x9000 | 0x5000 | core NVS |
+| otadata | ota | 0xe000 | 0x2000 | boot-slot selector |
+| factory | app | 0x10000 | 0x180000 (1.5 MB) | **recovery** (never OTA'd) |
+| ota_0 | app | 0x190000 | 0x2C0000 (2.75 MB) | **main app — the ONLY slot that persistently boots** |
+| ota_1 | app | 0x450000 | 0x1B0000 (**1.6875 MB**) | **USB OTA staging only** (not a boot target) |
+| littlefs | littlefs | 0x600000 | 0x1e0000 (1.875 MB) | user data |
+| settings | nvs | 0x7e0000 | 0x10000 | shared NVS (namespace `recovery`, partition label `settings`) |
+| coredump | coredump | 0x7f0000 | 0x10000 | crash dumps |
 
-- Merged image omits `boot_app0.bin` at `0xe000` → OTA data = `0xFF` → bootloader always boots factory
+### CRITICAL: Boot architecture — why `ota_0` is the only persistent slot
+
+This board does **not** use normal A/B OTA. The boot flow is deliberately recovery-first:
+
+1. Main app **erases otadata on every boot** (`ats-mini.ino` `setup()`), so otadata = `0xFF`.
+2. With otadata `0xFF`, the bootloader boots **factory (recovery)** first, every power-on.
+3. Recovery's 2s splash, if not interrupted, calls `esp_ota_set_boot_partition(ota_0)` and reboots → boots **ota_0**.
+4. Main app (ota_0) runs, erases otadata again → loop repeats next power cycle.
+
+**Consequence (burned a lot of debugging time — do not forget):** an `esp_ota` "switch to the *next* slot"
+update (writing ota_1 + `set_boot_partition(ota_1)`) **runs once then reverts** — the next power cycle
+goes recovery → ota_0 (the old image). `ota_0` is the single canonical main slot; `ota_1` is scratch.
+Any persistent main-firmware update **must land in ota_0**, and the only safe way to write ota_0 is
+from recovery (you can't overwrite the slot you're executing from).
+
+- Merged image omits `boot_app0.bin` at `0xe000` → otadata `0xFF` → bootloader boots factory.
 - Boot-loop counter: `Preferences("recovery")` key `bootcount`; incremented before forwarding, reset in main `setup()`. At 3 → stays in recovery UI.
-- Main app erases OTA data in `setup()` so next power-cycle re-enters recovery.
+- Shared NVS handshake (main app ↔ recovery): both open `Preferences.begin("recovery", false, "settings")`. Keys: `bootcount`; `migPend/migSize/migCrc/migFail` (recovery self-migration → factory); `fwStagePend/fwStageSz/fwStageCrc/fwStageFail` (USB firmware staging → ota_0).
+
+### USB firmware flashing (`Remote.cpp` serial OTA + recovery installer)
+
+Two facts make this work; both were non-obvious:
+
+1. **Flow control is mandatory.** The S3 native USB-Serial/JTAG (HWCDC) RX buffer is 256 B by default.
+   Streaming a multi-MB image with no pacing overruns it → silently dropped bytes → transfer never
+   completes ("No completion response"). Fix: `Serial.setRxBufferSize(8192)` before `Serial.begin()`,
+   and a **per-block ACK** protocol — firmware acks every `SOTA_BLOCK` (4 KB) as `{"t":"ota","ack":N,"total":T}`;
+   the app sends one block and waits for the ack before the next. (This is exactly why esptool works and
+   a raw blast doesn't — esptool is request/response per block.)
+2. **Install goes through recovery (mirrors the boot architecture above).** USB **Firmware** = stream raw
+   into `ota_1` (staging, CRC-checked), record `fwStage*` in NVS, erase otadata, reboot → recovery's
+   `installStagedFirmware()` copies `ota_1` → `ota_0` via the same `esp_ota` path the Wi-Fi OTA uses
+   (validates SHA-256, sets boot, CRC read-back), then reboots into the new firmware. Power-loss safe
+   (flag cleared only after ota_0 verifies; interrupted install re-runs from intact ota_1) and brick-safe
+   (running slot untouched; bootloader falls back to factory if ota_0 is invalid). Needs **both** v2.72+
+   main and recovery (the installer lives in recovery).
+   - USB **Recovery** flashing (`rec_begin`) writes the factory partition **in place** (recovery image ≤ 1.5 MB).
+   - Serial OTA protocol: `{"cmd":"ota_begin"|"rec_begin","size":N,"crc":C}` → `{"ok":true,...,"block":4096}`
+     → blocks + acks → `{"fin":1}` (verifying heartbeat) → `{"ok":true,"staged":1}` (fw) or `{"ok":true}` (rec).
+   - CRC32 = zlib/IEEE, sent from Java as a **signed** int32 (`CRC32().value.toInt()`) so the firmware's `atol` round-trips it.
+
+**Staging size ceiling:** `ota_1` is **1.6875 MB**; the main app is ~1.6 MB (~90 KB headroom). When the app
+outgrows `ota_1`, USB staging breaks — repartition (shrink factory/littlefs to grow ota_1) is a breaking,
+full-reflash change. Wi-Fi recovery OTA writes ota_0 directly (2.75 MB) and is not subject to this limit.
+
+**Extending recovery to alternative firmwares (future):** recovery is the universal installer — it's the only
+context that can write `ota_0`. To boot an alternative firmware, have recovery install the chosen image to
+`ota_0` (same `installStagedFirmware` mechanism). There is no spare *bootable* app slot (ota_1 is staging,
+factory is recovery), so "multiple installed firmwares" means: keep the images elsewhere (littlefs / staged in
+ota_1 / re-downloaded) and let recovery swap the selected one into `ota_0`. Any new app firmware must keep the
+recovery-first contract: erase otadata in `setup()`, reset `bootcount`, and fit within `ota_0` (2.75 MB).
 
 **WiFi:** No AP on boot. Async STA tries `BEAST_ROUTER` then `IoT` (both pw `appu1989`). Toast in footer shows status. User starts open adhoc AP (`ATS-Recovery`, no password) from Network menu.
 
@@ -124,7 +176,10 @@ OPI PSRAM uses the GPIOs QIO needs → garbage bootloader read → **hangs `ets_
 
 - `arduino-cli compile --profile esp32s3-ospi --export-binaries`
 - Desktop unbrick: `esptool --chip esp32s3 erase_flash` then `write_flash --flash_mode dio --flash_freq 40m 0x0 *-full.bin`
-- Android `EspFlasher.kt`: ROM protocol, no stub, 1 KB blocks, `full.bin` at `0x0`.
+- Android USB flash has two methods (`ToolsScreen.kt`):
+  - **Live (default)** — serial OTA to the running firmware (`SerialOta.kt`): Firmware → stage ota_1 → recovery installs ota_0; Recovery → factory in place. No buttons. Needs v2.72+ on **both** main and recovery.
+  - **Bootloader (esptool)** — `EspFlasher.kt`: ROM protocol, no stub, 1 KB blocks, manual download-mode entry (hold BOOT, tap RESET, release BOOT). Works from any state incl. bricked. Use for Full / unbrick or pre-v2.72.
+- Native USB caveat: device→host (console) and ROM mode (esptool) always work; host→running-firmware needs the flow control above. DTR/RTS auto-reset into download mode is unreliable through the Android CDC driver — prefer manual BOOT+RESET for the Bootloader method.
 
 ## Versioning
 
