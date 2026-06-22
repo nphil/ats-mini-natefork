@@ -1428,7 +1428,10 @@ static void handleSerialCmd(const char* line) {
   const char* v = strchr(cv, ':'); if (!v) return;
   v++; while (*v == ' ' || *v == '"') v++;
 
-  if (!strncmp(v, "ota_begin", 9)) {
+  if (!strncmp(v, "ping", 4)) {
+    // Liveness probe — lets the app confirm two-way USB comms before an OTA.
+    Serial.println("{\"t\":\"pong\"}");
+  } else if (!strncmp(v, "ota_begin", 9)) {
     const char* sk = strstr(line, "\"size\":");
     size_t sz = sk ? (size_t)atol(sk + 7) : 0;
     if (!sz) { Serial.println("{\"ok\":false,\"err\":\"no size\"}"); return; }

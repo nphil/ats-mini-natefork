@@ -37,32 +37,39 @@ class SerialOta(private val port: UsbSerialPort) {
         val cmd = if (recovery) "rec_begin" else "ota_begin"
         val beginCmd = "{\"cmd\":\"$cmd\",\"size\":${image.size},\"crc\":$crc}"
 
-        // Quiet the live status stream first so its packets don't drown the reply,
-        // then handshake. Retry a few times — the first command/reply can be lost
-        // while the port is handed over from the console reader.
+        // Quiet the live status stream first so its packets don't drown the reply.
         writeLine("{\"cmd\":\"sub\",\"ms\":0}")
         Thread.sleep(150)
         drain()
 
+        // ── Pre-flight: confirm two-way USB comms are actually alive ──────────
+        // This is the key diagnostic. esptool talks to the ROM bootloader (a
+        // hardware download mode); we instead talk to the *running* firmware over
+        // USB serial, so the link must be live AND the firmware new enough to
+        // speak the protocol. If we can't even get a "pong" back there's no point
+        // streaming a multi-MB image — and we can tell the user precisely what's
+        // wrong (dead link vs. too-old firmware) instead of a vague stall.
+        if (!preflight(progress)) return false
+
         var begin: String? = null
-        for (attempt in 1..4) {
+        for (attempt in 1..6) {
             progress.status("Requesting OTA slot from firmware… (try $attempt)")
             if (!writeLine(beginCmd)) {
                 progress.status("USB write failed — is the cable connected?")
                 return false
             }
-            begin = waitForResult(2500, progress)
+            begin = waitForResult(3000, progress)
             if (begin != null) break
             drain()
         }
         when {
             begin == null -> {
                 progress.status(
-                    "No response from firmware after several tries.\n\n" +
-                    "• Make sure the radio is connected (Device → Connect) and running.\n" +
-                    "• Live flashing needs firmware v2.66+ already installed.\n\n" +
-                    "Reliable fallback: use the Bootloader method (hold BOOT, tap RESET, " +
-                    "release BOOT), which flashes via the ROM loader from any state."
+                    "Firmware answered the ping but not the OTA request.\n\n" +
+                    "This usually means the installed firmware predates live OTA " +
+                    "support (needs v2.66+). Update once via the Bootloader method " +
+                    "(hold BOOT, tap RESET, release BOOT) or Wi-Fi OTA, then Live " +
+                    "flashing will work."
                 )
                 return false
             }
@@ -106,6 +113,54 @@ class SerialOta(private val port: UsbSerialPort) {
             }
         )
         return ok
+    }
+
+    /**
+     * Probe the link with `{"cmd":"ping"}` and wait for `{"t":"pong"}`. Tries a
+     * few times (the first byte after the console-reader handover can be lost).
+     * Returns true once the firmware answers; on failure sets a precise status
+     * and returns false so the caller aborts before streaming the image.
+     */
+    private fun preflight(progress: Progress): Boolean {
+        for (attempt in 1..6) {
+            progress.status("Checking USB link to the radio… (try $attempt)")
+            if (!writeLine("{\"cmd\":\"ping\"}")) {
+                progress.status("USB write failed — is the cable connected and the radio on?")
+                return false
+            }
+            val reply = waitForPong(800)
+            if (reply) return true
+            drain()
+        }
+        progress.status(
+            "No response from the radio over USB.\n\n" +
+            "The serial link isn't answering, so live flashing can't run. Try:\n" +
+            "• Tap Device → Disconnect, then Connect, and Flash again.\n" +
+            "• Re-seat the USB cable (use a data cable, not charge-only).\n\n" +
+            "Reliable fallback (works from any state, like esptool): switch Method " +
+            "to Bootloader — hold BOOT, tap RESET, release BOOT — then Flash."
+        )
+        return false
+    }
+
+    /** Read lines until a `{"t":"pong"}` arrives or timeout. */
+    private fun waitForPong(timeoutMs: Int): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        val buf = ByteArray(512)
+        while (System.currentTimeMillis() < deadline) {
+            val n = runCatching { port.read(buf, 200) }.getOrDefault(0)
+            if (n > 0) {
+                rx.append(String(buf, 0, n))
+                var idx = rx.indexOf("\n")
+                while (idx >= 0) {
+                    val line = rx.substring(0, idx)
+                    rx.delete(0, idx + 1)
+                    if (line.contains("pong")) { rx.setLength(0); return true }
+                    idx = rx.indexOf("\n")
+                }
+            }
+        }
+        return false
     }
 
     private fun writeLine(s: String): Boolean =

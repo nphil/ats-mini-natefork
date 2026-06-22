@@ -685,6 +685,16 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     return REMOTE_CHANGED;
   }
 
+  // ---- Liveness ping --------------------------------------------------
+  // A minimal request/reply the companion app uses to confirm two-way USB
+  // comms are alive *before* committing to a serial OTA. Honoured regardless
+  // of usbMode (like the OTA commands) so the app can probe out of the box.
+  if(!strcmp(cmd, "ping"))
+  {
+    stream->print("{\"t\":\"pong\"}\r\n");
+    return REMOTE_CHANGED;
+  }
+
   // ---- Selectable option lists (read-only) ----------------------------
   // Mode/band/step/bandwidth/AGC names + current indices, for native pickers.
   if(!strcmp(cmd, "opts"))
