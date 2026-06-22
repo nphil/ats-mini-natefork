@@ -245,11 +245,12 @@ private fun bootloaderOffset(kind: FlashKind): Int = when (kind) {
 /** One-line description of the selected kind+method combination. */
 private fun comboDesc(kind: FlashKind, method: FlashMethod): String = when {
     method == FlashMethod.LIVE && kind == FlashKind.FIRMWARE ->
-        "Convenience path — no buttons — but it depends on the running firmware receiving over " +
-        "USB, which is unreliable on the native S3 USB. If you get \"no response\", use Bootloader."
+        "No buttons. Streams the image to the spare slot (flow-controlled, CRC-checked), then the " +
+        "radio reboots into recovery and installs it to the boot slot automatically. Watch the radio " +
+        "screen — it reboots a couple of times. Needs firmware v2.72+ already installed."
     method == FlashMethod.LIVE && kind == FlashKind.RECOVERY ->
-        "Convenience path — no buttons — but it depends on the running firmware receiving over " +
-        "USB, which is unreliable on the native S3 USB. If you get \"no response\", use Bootloader."
+        "No buttons. Streams the recovery image and writes it to the factory partition in place, then " +
+        "reboots. Works while the radio runs normal firmware. Needs firmware v2.72+ already installed."
     method == FlashMethod.BOOTLOADER && kind == FlashKind.FULL ->
         "Same as esptool: drives the ROM download mode. Complete 8 MB image — erases everything " +
         "incl. presets & settings. Clean install / unbrick. Reliable from any state."
@@ -314,11 +315,10 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
     val context = LocalContext.current
 
     var kind by remember { mutableStateOf(FlashKind.FIRMWARE) }
-    // Default to the ROM Bootloader path — it's exactly what esptool does (drives
-    // the hardware download mode) and is the reliable, works-from-any-state option.
-    // "Live" depends on the running firmware's USB-Serial/JTAG *receive* path, which
-    // is hardware-flaky on the native S3 USB; offer it but don't default to it.
-    var method by remember { mutableStateOf(FlashMethod.BOOTLOADER) }
+    // Default to the no-buttons USB path: flow-controlled stream → spare slot →
+    // auto-install via recovery. Bootloader (esptool ROM mode) stays one tap away
+    // for a full image / unbrick or any radio older than v2.72.
+    var method by remember { mutableStateOf(FlashMethod.LIVE) }
     var source by remember { mutableStateOf(FwSource.GITHUB) }
 
     var releases by remember { mutableStateOf<List<GithubReleases.Firmware>>(emptyList()) }

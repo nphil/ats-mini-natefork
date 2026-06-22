@@ -460,11 +460,11 @@ static void renderList(const char* title, int total,
 static bool gFacBad = false;
 
 // Simple full-screen migration progress (own drawing; runs before the menu).
-static void drawMig(const char* msg, int pct, uint16_t color) {
+static void drawProgressScreen(const char* title, const char* msg, int pct, uint16_t color) {
   tft.fillScreen(D_BG);
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(D_CYAN, D_BG); tft.setTextFont(2);
-  tft.drawString("Updating Recovery", W / 2, 40);
+  tft.drawString(title, W / 2, 40);
   tft.setTextColor(color, D_BG); tft.setTextFont(2);
   tft.drawString(msg, W / 2, 80);
   if (pct >= 0) {
@@ -472,6 +472,12 @@ static void drawMig(const char* msg, int pct, uint16_t color) {
     tft.drawRect(12, 110, bw, 16, D_PURPLE);
     tft.fillRect(13, 111, (int)((uint64_t)pct * (bw - 2) / 100), 14, D_GREEN);
   }
+}
+static void drawMig(const char* msg, int pct, uint16_t color) {
+  drawProgressScreen("Updating Recovery", msg, pct, color);
+}
+static void drawFwInstall(const char* msg, int pct, uint16_t color) {
+  drawProgressScreen("Installing Firmware", msg, pct, color);
 }
 
 // Stage 2 of recovery self-migration. Runs at boot when a migration is pending.
@@ -562,6 +568,81 @@ static void recoveryMigrationStage2() {
   esp_ota_set_boot_partition(o1);   // keep booting this (good) recovery
   drawMig("Repair failed - use USB", -1, D_RED);
   delay(3500);
+}
+
+// Install a USB-staged main firmware image (ota_1 → ota_0). The running main app
+// streamed the image into ota_1 over USB, recorded size+CRC + fwStagePend, and
+// rebooted with otadata erased — so we (recovery, from factory) boot first and
+// finish the job. We install to ota_0, the only slot this device boots (recovery
+// always forwards there; the main app erases otadata every boot). Power-loss safe:
+// the pending flag is cleared only after ota_0 is verified, so an interrupted
+// install simply re-runs from the intact image still in ota_1.
+static void installStagedFirmware() {
+  Preferences p; p.begin("recovery", false, "settings");
+  uint8_t  pend    = p.getUChar("fwStagePend", 0);
+  uint32_t size    = p.getUInt("fwStageSz", 0);
+  uint32_t expCrc  = p.getUInt("fwStageCrc", 0);
+  uint8_t  failCnt = p.getUChar("fwStageFail", 0);
+  p.end();
+  if (!pend) return;
+
+  const esp_partition_t* o0 = getOta0();
+  const esp_partition_t* o1 = getOta1();
+  if (!o0 || !o1) return;
+
+  // 1) Re-verify the staged image in ota_1 before overwriting ota_0.
+  drawFwInstall("Verifying firmware...", -1, D_FG);
+  if (size == 0 || size > o0->size || size > o1->size || partCrc32(o1, size) != expCrc) {
+    drawFwInstall("Image check failed", -1, D_RED);
+    // ota_0 is untouched; abandon and clear the flag so the existing firmware boots.
+    Preferences q; q.begin("recovery", false, "settings");
+    q.putUChar("fwStagePend", 0); q.putUChar("fwStageFail", 0); q.end();
+    delay(2500);
+    return;
+  }
+
+  // 2) Copy ota_1 → ota_0 via esp_ota (validates the image + sets boot to ota_0),
+  //    then read-back CRC-verify. A few in-boot retries.
+  bool ok = false;
+  for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+    drawFwInstall("Installing...", 0, D_FG);
+    if (!otaBegin((size_t)size)) continue;
+    static uint8_t fbuf[1024];
+    size_t off = 0; bool werr = false;
+    while (off < size) {
+      size_t n = min((size_t)sizeof(fbuf), (size_t)size - off);
+      if (esp_partition_read(o1, off, fbuf, n) != ESP_OK) { werr = true; break; }
+      if (!otaWrite(fbuf, n)) { werr = true; break; }
+      off += n;
+      if ((off % 65536) < n) drawFwInstall("Installing...", (int)(off * 100 / size), D_FG);
+    }
+    if (werr) continue;
+    if (!otaFinish()) continue;   // esp_ota_end (validates) + set_boot(ota_0)
+    drawFwInstall("Verifying install...", 100, D_FG);
+    ok = (partCrc32(o0, size) == expCrc);
+  }
+
+  if (ok) {
+    Preferences q; q.begin("recovery", false, "settings");
+    q.putUChar("fwStagePend", 0); q.putUChar("fwStageFail", 0); q.putInt("bootcount", 0); q.end();
+    drawFwInstall("Firmware updated!", 100, D_GREEN);
+    delay(1200); esp_restart();   // boots ota_0 = new firmware
+  }
+
+  // Install failed this boot. ota_0 only becomes bootable after esp_ota validates
+  // it, so the bootloader can never land on a half-written image — a power cycle
+  // safely re-runs from ota_1.
+  failCnt++;
+  Preferences q; q.begin("recovery", false, "settings"); q.putUChar("fwStageFail", failCnt); q.end();
+  if (failCnt < 5) {
+    drawFwInstall("Install retry...", -1, D_YELLOW);
+    delay(1500); esp_restart();
+  }
+  // Persistent failure: stop looping. Clear the flag and fall through to the menu.
+  Preferences r; r.begin("recovery", false, "settings");
+  r.putUChar("fwStagePend", 0); r.putUChar("fwStageFail", 0); r.end();
+  drawFwInstall("Install failed - use USB", -1, D_RED);
+  delay(3000);
 }
 
 static bool splashAndDecide() {
@@ -1810,6 +1891,10 @@ void setup() {
   // Install a pending recovery update (stage 2 of self-migration) before anything
   // else — this reboots when done, so it never falls through to normal boot.
   recoveryMigrationStage2();
+
+  // Install a USB-staged main firmware image (ota_1 → ota_0) if one is pending.
+  // Also reboots into the new firmware when done; on failure it falls through.
+  installStagedFirmware();
 
   // Splash + boot decision (boots main firmware unless encoder held / boot-loop)
   splashAndDecide();

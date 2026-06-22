@@ -117,7 +117,10 @@ class SerialOta(private val port: UsbSerialPort) {
         }
 
         progress.status("Verifying & finalizing…")
-        val done = waitForResult(20000, progress) ?: run {
+        // The radio sends {"fin":1} when it starts verifying, then the result.
+        // esp_ota validates the whole image (SHA-256) at 80 MHz before switching
+        // the boot slot, so allow generous time after the stream completes.
+        val done = waitForResult(45000, progress) ?: run {
             progress.status(
                 "No completion response.\n\n" +
                 "The device may still be flashing/rebooting — give it a few seconds, " +
@@ -129,6 +132,13 @@ class SerialOta(private val port: UsbSerialPort) {
         progress.status(
             when {
                 !ok -> "Flash failed: $done"
+                // Firmware staged to ota_1: the radio reboots into recovery, which
+                // installs it to the boot slot (ota_0) and reboots into it. Shown
+                // on the radio screen; the USB link drops during the reboots.
+                done.contains("\"staged\":1") ->
+                    "Image verified & staged — the radio is rebooting into recovery to install it. " +
+                    "Watch the radio screen; it'll reboot a couple of times into the new firmware. " +
+                    "Don't unplug."
                 // Recovery self-migration: the radio reboots and installs to the
                 // factory partition on its own, showing progress on its screen.
                 done.contains("\"stage\":1") ->
@@ -246,6 +256,9 @@ class SerialOta(private val port: UsbSerialPort) {
                     rx.delete(0, idx + 1)
                     when {
                         line.contains("\"ok\"") -> return line          // begin ack, done, or error
+                        // Finalize heartbeat: image received, radio now verifying
+                        // + switching the boot slot. Keep waiting (this is slow).
+                        line.contains("\"fin\"") -> { progress.percent(100); progress.status("Radio verifying image & switching boot slot — don't unplug…") }
                         line.contains("\"progress\"") -> parseProgress(line)?.let { progress.percent(it) }
                     }
                     idx = rx.indexOf("\n")

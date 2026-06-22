@@ -5,15 +5,16 @@
 #include "Draw.h"
 #include "Remote.h"
 #include "Storage.h"
-#include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <Preferences.h>
 
 // ── Serial firmware OTA over USB (no ROM bootloader, no reset) ───────────────
 // The running app receives a firmware image over the existing 115200 USB serial
-// link and writes it via esp_ota / Update, then reboots into the new firmware.
-// Two flavours:
-//   SOTA_FW  — app firmware → next OTA slot (Update lib auto-selects + boot-switch)
+// link, stages it raw in a partition, then reboots. Two flavours:
+//   SOTA_FW  — app firmware → staged in ota_1, then recovery installs it to ota_0
+//              (the only slot this device boots; see ota_begin for why a slot
+//              switch can't be used here)
 //   SOTA_REC — recovery image → factory partition (0x10000), written in place
 //              while running from an OTA slot (factory is not the active partition)
 enum SerialOtaSt { SOTA_IDLE, SOTA_FW, SOTA_REC };
@@ -73,15 +74,11 @@ static void serialOtaTick(Stream *stream)
     int n = Serial.readBytes(buf, want);
     if(n <= 0) break;
 
-    bool ok;
-    if(sOtaState == SOTA_FW)
-      ok = (Update.write(buf, n) == (size_t)n);
-    else
-      ok = (esp_partition_write(sRecPart, sOtaWritten, buf, n) == ESP_OK);
-
+    // Both flavours stage the raw image into a partition: SOTA_FW → ota_1
+    // (recovery later installs it to ota_0), SOTA_REC → factory in place.
+    bool ok = (esp_partition_write(sRecPart, sOtaWritten, buf, n) == ESP_OK);
     if(!ok)
     {
-      if(sOtaState == SOTA_FW) Update.abort();
       stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"write\"}\r\n");
       sOtaState = SOTA_IDLE;
       return;
@@ -107,30 +104,60 @@ static void serialOtaTick(Stream *stream)
     bool crcOk = (sOtaCrcExp == 0 || crc == sOtaCrcExp);
 
     bool ok = false;
+    bool staged = false;
     const char *err = "";
+
+    // Tell the host we have the whole image and are now verifying. Reading the
+    // partition back to CRC-check it takes a moment, so the heartbeat lets the
+    // app keep waiting and proves finalization was reached if anything fails.
+    if(crcOk) { stream->print("{\"t\":\"ota\",\"fin\":1}\r\n"); stream->flush(); }
+
     if(!crcOk)
     {
-      if(sOtaState == SOTA_FW) Update.abort();
       err = "crc";
     }
-    else if(sOtaState == SOTA_FW)
+    else
     {
-      ok = Update.end(true);          // SHA-verifies image + sets boot partition
-      if(!ok) err = "verify";
-    }
-    else // SOTA_REC: read the factory partition back and CRC-verify the install
-    {
+      // Read the staged partition back and CRC-verify what actually landed.
       ok = (partCrc32(sRecPart, sOtaExpected) == crc);
       if(!ok) err = "readback";
     }
 
+    // SOTA_FW: the image is staged in ota_1. Hand off to recovery, which installs
+    // it to ota_0 (the one slot this device actually boots — recovery always
+    // forwards there, and the main app erases otadata every boot). Record size+CRC
+    // and a pending flag the recovery reads, then reboot: otadata is already
+    // erased this boot, so a plain restart lands in recovery automatically.
+    if(ok && sOtaState == SOTA_FW)
+    {
+      Preferences pr; pr.begin("recovery", false, "settings");
+      pr.putUInt("fwStageSz", (uint32_t)sOtaExpected);
+      pr.putUInt("fwStageCrc", crc);
+      pr.putUChar("fwStagePend", 1);
+      pr.end();
+      staged = true;
+    }
+
     if(ok)
-      stream->printf("{\"t\":\"ota\",\"ok\":true,\"bytes\":%u}\r\n", (unsigned)sOtaWritten);
+      stream->printf("{\"t\":\"ota\",\"ok\":true,\"bytes\":%u%s}\r\n",
+                     (unsigned)sOtaWritten, staged ? ",\"staged\":1" : "");
     else
       stream->printf("{\"t\":\"ota\",\"ok\":false,\"err\":\"%s\"}\r\n", err);
 
     sOtaState = SOTA_IDLE;
-    if(ok) { stream->flush(); delay(600); esp_restart(); }
+    if(ok)
+    {
+      stream->flush(); delay(600);
+      if(staged)
+      {
+        // Force the next boot through recovery (otadata = 0xFF) so it picks up
+        // the staged install even if something already pointed otadata at a slot.
+        const esp_partition_t *otad = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+        if(otad) esp_partition_erase_range(otad, 0, otad->size);
+      }
+      esp_restart();
+    }
   }
 }
 
@@ -718,18 +745,25 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     return REMOTE_CHANGED;
   }
 
-  // ---- Serial OTA: app firmware → next OTA slot ------------------------
-  // Reliable USB update with no ROM bootloader: the app receives the image
-  // over serial and writes it to the inactive OTA partition, then reboots.
+  // ---- Serial OTA: app firmware → staged in ota_1, installed by recovery ----
+  // Reliable USB update with no ROM bootloader: the app streams the image, we
+  // stage it raw in ota_1, then reboot into recovery which installs it to ota_0
+  // (the only slot this device boots). esp_ota's next-slot switch can't be used
+  // here — the main app erases otadata every boot and recovery always forwards
+  // to ota_0, so a slot switch would run once then revert.
   if(!strcmp(cmd, "ota_begin"))
   {
     long sz = 0, crc = 0;
-    if(!jsonInt(json, "size", &sz) || sz <= 0)
+    const esp_partition_t *p = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, nullptr);
+    if(!jsonInt(json, "size", &sz) || sz <= 0 || !p || (size_t)sz > p->size)
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"size\"}\r\n"); return REMOTE_CHANGED; }
     jsonInt(json, "crc", &crc);
-    if(!Update.begin((size_t)sz, U_FLASH))
-      { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"begin\"}\r\n"); return REMOTE_CHANGED; }
-    sOtaState = SOTA_FW; sOtaExpected = (size_t)sz; sOtaWritten = 0; sOtaAcked = 0;
+    size_t eraseSz = ((size_t)sz + 0xFFF) & ~(size_t)0xFFF;
+    if(eraseSz > p->size) eraseSz = p->size;
+    if(esp_partition_erase_range(p, 0, eraseSz) != ESP_OK)
+      { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"erase\"}\r\n"); return REMOTE_CHANGED; }
+    sRecPart = p; sOtaState = SOTA_FW; sOtaExpected = (size_t)sz; sOtaWritten = 0; sOtaAcked = 0;
     sOtaCrcRun = 0xFFFFFFFFu; sOtaCrcExp = (uint32_t)crc;
     stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld,\"block\":%u}\r\n", sz, SOTA_BLOCK);
     return REMOTE_CHANGED;
@@ -757,7 +791,6 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
   // ---- Abort an in-progress serial OTA --------------------------------
   if(!strcmp(cmd, "ota_abort"))
   {
-    if(sOtaState == SOTA_FW) Update.abort();
     sOtaState = SOTA_IDLE;
     stream->print("{\"t\":\"ota\",\"ok\":true,\"aborted\":true}\r\n");
     return REMOTE_CHANGED;
