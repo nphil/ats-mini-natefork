@@ -233,7 +233,7 @@ private fun inferKind(name: String): FlashKind = when {
  *  - BOOTLOADER: the ROM bootloader (esptool-style), like a computer. Flashes any
  *    image to its flash offset; requires manual download-mode entry (BOOT+RESET).
  */
-private enum class FlashMethod(val label: String) { LIVE("Live (running)"), BOOTLOADER("Bootloader") }
+private enum class FlashMethod(val label: String) { LIVE("Live (running)"), BOOTLOADER("Bootloader (esptool)") }
 
 /** Flash offset for ROM-bootloader writes, per image kind. */
 private fun bootloaderOffset(kind: FlashKind): Int = when (kind) {
@@ -245,17 +245,19 @@ private fun bootloaderOffset(kind: FlashKind): Int = when (kind) {
 /** One-line description of the selected kind+method combination. */
 private fun comboDesc(kind: FlashKind, method: FlashMethod): String = when {
     method == FlashMethod.LIVE && kind == FlashKind.FIRMWARE ->
-        "Live update over USB while the radio runs — no buttons. Writes the app to the spare " +
-        "OTA slot, keeps presets & settings, then reboots into the new firmware."
+        "Convenience path — no buttons — but it depends on the running firmware receiving over " +
+        "USB, which is unreliable on the native S3 USB. If you get \"no response\", use Bootloader."
     method == FlashMethod.LIVE && kind == FlashKind.RECOVERY ->
-        "Live update of the recovery image while the radio runs in normal firmware (not while " +
-        "already in recovery). Reboots when done."
+        "Convenience path — no buttons — but it depends on the running firmware receiving over " +
+        "USB, which is unreliable on the native S3 USB. If you get \"no response\", use Bootloader."
     method == FlashMethod.BOOTLOADER && kind == FlashKind.FULL ->
-        "Complete 8 MB image — erases everything incl. presets & settings. Clean install / unbrick."
+        "Same as esptool: drives the ROM download mode. Complete 8 MB image — erases everything " +
+        "incl. presets & settings. Clean install / unbrick. Reliable from any state."
     method == FlashMethod.BOOTLOADER && kind == FlashKind.FIRMWARE ->
-        "Full app + bootloader image written at 0x0; preserves presets & settings (LittleFS)."
+        "Same as esptool: drives the ROM download mode. Full app + bootloader at 0x0; preserves " +
+        "presets & settings (LittleFS). Reliable from any state."
     else /* BOOTLOADER + RECOVERY */ ->
-        "Writes the recovery image to the factory partition (0x10000)."
+        "Same as esptool: writes the recovery image to the factory partition (0x10000)."
 }
 
 /** The release asset to use for a given kind+method (different binaries per path). */
@@ -312,7 +314,11 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
     val context = LocalContext.current
 
     var kind by remember { mutableStateOf(FlashKind.FIRMWARE) }
-    var method by remember { mutableStateOf(FlashMethod.LIVE) }
+    // Default to the ROM Bootloader path — it's exactly what esptool does (drives
+    // the hardware download mode) and is the reliable, works-from-any-state option.
+    // "Live" depends on the running firmware's USB-Serial/JTAG *receive* path, which
+    // is hardware-flaky on the native S3 USB; offer it but don't default to it.
+    var method by remember { mutableStateOf(FlashMethod.BOOTLOADER) }
     var source by remember { mutableStateOf(FwSource.GITHUB) }
 
     var releases by remember { mutableStateOf<List<GithubReleases.Firmware>>(emptyList()) }
