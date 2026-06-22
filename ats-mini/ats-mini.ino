@@ -120,7 +120,9 @@ NordicUART BLESerial = NordicUART(RECEIVER_NAME);
 //
 void setup()
 {
-  // Enable serial port
+  // Enable serial port. Grow the USB-CDC RX buffer (default 256 B) so a flow-
+  // controlled USB OTA stream has slack between drains and never overflows.
+  Serial.setRxBufferSize(8192);
   Serial.begin(115200);
   Serial.println("ATS-Mini starting...");
   Serial.printf("setup() is running on Core %d\n", xPortGetCoreID());

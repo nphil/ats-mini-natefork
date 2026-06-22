@@ -24,6 +24,14 @@ static const esp_partition_t *sRecPart = nullptr;
 static uint32_t sOtaCrcRun = 0xFFFFFFFFu;   // running CRC32 of received bytes
 static uint32_t sOtaCrcExp = 0;             // expected CRC32 (0 = skip check)
 
+// Flow control: the host streams one block, then waits for our {"ack":N} before
+// sending the next. Without this the host outruns the 256-byte USB-CDC RX buffer
+// and bytes are dropped → the transfer never completes ("No completion response").
+// esptool works precisely because it waits for a reply after every block; we now
+// do the same. Block size is sent to the host in the begin reply.
+#define SOTA_BLOCK 4096u
+static size_t sOtaAcked = 0;                 // byte count of the last ack we sent
+
 // CRC32 (zlib / IEEE-802.3, matches java.util.zip.CRC32). Running form: start at
 // 0xFFFFFFFF, accumulate, final result = state ^ 0xFFFFFFFF.
 static uint32_t crc32Run(uint32_t crc, const uint8_t *data, size_t len)
@@ -80,9 +88,16 @@ static void serialOtaTick(Stream *stream)
     }
     sOtaCrcRun = crc32Run(sOtaCrcRun, buf, n);
     sOtaWritten += n;
-    if((sOtaWritten % 32768) < (size_t)n)
-      stream->printf("{\"t\":\"ota\",\"progress\":%u,\"total\":%u}\r\n",
+
+    // Acknowledge each completed block (and the final partial one). The host
+    // blocks until it sees an ack covering what it sent, so the RX buffer can
+    // never overflow. The ack doubles as progress (host derives percent from it).
+    if(sOtaWritten - sOtaAcked >= SOTA_BLOCK || sOtaWritten >= sOtaExpected)
+    {
+      sOtaAcked = sOtaWritten;
+      stream->printf("{\"t\":\"ota\",\"ack\":%u,\"total\":%u}\r\n",
                      (unsigned)sOtaWritten, (unsigned)sOtaExpected);
+    }
   }
 
   if(sOtaWritten >= sOtaExpected)
@@ -714,9 +729,9 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     jsonInt(json, "crc", &crc);
     if(!Update.begin((size_t)sz, U_FLASH))
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"begin\"}\r\n"); return REMOTE_CHANGED; }
-    sOtaState = SOTA_FW; sOtaExpected = (size_t)sz; sOtaWritten = 0;
+    sOtaState = SOTA_FW; sOtaExpected = (size_t)sz; sOtaWritten = 0; sOtaAcked = 0;
     sOtaCrcRun = 0xFFFFFFFFu; sOtaCrcExp = (uint32_t)crc;
-    stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld}\r\n", sz);
+    stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld,\"block\":%u}\r\n", sz, SOTA_BLOCK);
     return REMOTE_CHANGED;
   }
 
@@ -733,9 +748,9 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     if(eraseSz > p->size) eraseSz = p->size;
     if(esp_partition_erase_range(p, 0, eraseSz) != ESP_OK)
       { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"erase\"}\r\n"); return REMOTE_CHANGED; }
-    sRecPart = p; sOtaState = SOTA_REC; sOtaExpected = (size_t)sz; sOtaWritten = 0;
+    sRecPart = p; sOtaState = SOTA_REC; sOtaExpected = (size_t)sz; sOtaWritten = 0; sOtaAcked = 0;
     sOtaCrcRun = 0xFFFFFFFFu; sOtaCrcExp = (uint32_t)crc;
-    stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld,\"rec\":true}\r\n", sz);
+    stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld,\"rec\":true,\"block\":%u}\r\n", sz, SOTA_BLOCK);
     return REMOTE_CHANGED;
   }
 

@@ -23,6 +23,11 @@ class SerialOta(private val port: UsbSerialPort) {
 
     private val rx = StringBuilder()
 
+    // If a terminal {"ok":...} line arrives mid-stream (a device-side abort),
+    // waitForAck stashes it here so the caller can report the real cause instead
+    // of a generic stall.
+    private var pendingTerminal: String? = null
+
     /**
      * Flash [image] over the serial link. When [recovery] is true the image is
      * written to the factory/recovery partition (device must be running normal
@@ -79,16 +84,36 @@ class SerialOta(private val port: UsbSerialPort) {
             }
         }
 
+        // Flow control: the firmware advertises a block size in its begin reply.
+        // We send exactly one block, then wait for its {"ack":N} before sending
+        // the next. This is the fix for "No completion response": without it we
+        // outrun the device's USB-CDC RX buffer and it silently drops bytes, so
+        // the image never finishes. esptool works for the same reason — it waits
+        // for a reply after every block. block==0 ⇒ old firmware: fall back to a
+        // best-effort blast (update to v2.71+ for reliable USB flashing).
+        val block = Regex("\"block\":(\\d+)").find(begin!!)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         progress.status("Streaming firmware over USB…")
         var sent = 0
-        val block = 1024
+        val chunk = if (block > 0) block else 1024
         while (sent < image.size) {
-            val n = minOf(block, image.size - sent)
+            val n = minOf(chunk, image.size - sent)
             val ok = runCatching { port.write(image.copyOfRange(sent, sent + n), 3000); true }
                 .getOrDefault(false)
             if (!ok) { progress.status("USB write failed at $sent / ${image.size} bytes"); return false }
             sent += n
-            progress.percent(sent * 100 / image.size)
+            if (block > 0) {
+                if (!waitForAck(sent, 6000, progress)) {
+                    val term = pendingTerminal
+                    if (term != null) { progress.status("Device aborted the flash: $term"); return false }
+                    progress.status(
+                        "USB stalled at $sent / ${image.size} bytes — no ack from the radio.\n\n" +
+                        "Re-seat the cable and try again, or use the Bootloader method."
+                    )
+                    return false
+                }
+            } else {
+                progress.percent(sent * 100 / image.size)
+            }
         }
 
         progress.status("Verifying & finalizing…")
@@ -156,6 +181,40 @@ class SerialOta(private val port: UsbSerialPort) {
                     val line = rx.substring(0, idx)
                     rx.delete(0, idx + 1)
                     if (line.contains("pong")) { rx.setLength(0); return true }
+                    idx = rx.indexOf("\n")
+                }
+            }
+        }
+        return false
+    }
+
+    /**
+     * Wait until the firmware acks at least [target] bytes (`{"t":"ota","ack":N,
+     * "total":T}`), driving progress from the ack count. Returns false on timeout
+     * or if a terminal `{"ok":...}` line arrives first (stashed in [pendingTerminal]).
+     */
+    private fun waitForAck(target: Int, timeoutMs: Int, progress: Progress): Boolean {
+        pendingTerminal = null
+        val deadline = System.currentTimeMillis() + timeoutMs
+        val buf = ByteArray(512)
+        while (System.currentTimeMillis() < deadline) {
+            val n = runCatching { port.read(buf, 200) }.getOrDefault(0)
+            if (n > 0) {
+                rx.append(String(buf, 0, n))
+                var idx = rx.indexOf("\n")
+                while (idx >= 0) {
+                    val line = rx.substring(0, idx)
+                    rx.delete(0, idx + 1)
+                    val ack = Regex("\"ack\":(\\d+)").find(line)?.groupValues?.get(1)?.toLongOrNull()
+                    when {
+                        ack != null -> {
+                            val total = Regex("\"total\":(\\d+)").find(line)?.groupValues?.get(1)?.toLongOrNull()
+                            if (total != null && total > 0)
+                                progress.percent((ack * 100 / total).toInt().coerceIn(0, 100))
+                            if (ack >= target) return true
+                        }
+                        line.contains("\"ok\"") -> { pendingTerminal = line.trim(); return false }
+                    }
                     idx = rx.indexOf("\n")
                 }
             }
