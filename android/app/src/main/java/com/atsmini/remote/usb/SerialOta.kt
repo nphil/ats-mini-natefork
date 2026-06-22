@@ -83,9 +83,12 @@ class SerialOta(private val port: UsbSerialPort) {
         runCatching { port.write((s + "\n").toByteArray(), 2000); true }.getOrDefault(false)
 
     /**
-     * Read serial lines until one carrying an `{"t":"ota",...,"ok":...}` result
-     * (begin ack or completion) arrives, or until timeout. Progress lines
-     * (`{"t":"ota","progress":...}`) update the device-confirmed percent.
+     * Read serial lines until an OTA result line (begin ack / completion / error)
+     * arrives, or until timeout. Recognises both firmwares' reply formats:
+     *   main fw:   {"t":"ota","ok":true,...} / {"t":"ota","progress":P,"total":T}
+     *   recovery:  {"ok":true,...}           / {"progress":P,"total":T}
+     * A line containing "ok" is a result; one containing "progress" updates the
+     * device-confirmed percent. Other JSON (status, etc.) is ignored.
      */
     private fun waitForResult(timeoutMs: Int, progress: Progress): String? {
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -98,9 +101,9 @@ class SerialOta(private val port: UsbSerialPort) {
                 while (idx >= 0) {
                     val line = rx.substring(0, idx).trim()
                     rx.delete(0, idx + 1)
-                    if (line.contains("\"ota\"")) {
-                        if (line.contains("\"ok\"")) return line   // begin ack or done
-                        parseProgress(line)?.let { progress.percent(it) }
+                    when {
+                        line.contains("\"ok\"") -> return line          // begin ack, done, or error
+                        line.contains("\"progress\"") -> parseProgress(line)?.let { progress.percent(it) }
                     }
                     idx = rx.indexOf("\n")
                 }

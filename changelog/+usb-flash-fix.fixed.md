@@ -6,8 +6,13 @@ the image, and the firmware writes it via `esp_ota`/`Update` — Firmware → th
 Recovery → the factory partition in place — then reboots itself into the new image. No BOOT
 button, no download mode, and the device reliably restarts. JSON/OTA commands are now honoured
 over USB regardless of the radio's USB-serial menu setting, so it works out of the box.
-USB **Full** still uses the ROM bootloader and now clearly tells you to enter download mode
-first (hold BOOT, tap RESET, release BOOT). Image-kind guards block mismatched flashes
-(e.g. an `ota.bin` selected for Full, or a non-recovery image for Recovery). Wi-Fi OTA on the
-same network is hardened with smaller flushed chunks and up to 3 retries to survive the
+A new **Method** switch gives full computer parity: every image (Full / Firmware / Recovery)
+can also be flashed via the **ROM bootloader** (esptool-style) after manual download-mode entry
+(hold BOOT, tap RESET, release BOOT) — so you can flash from any state, including a bricked
+device or while already in recovery. **Live** serial flashing handles Firmware & Recovery while
+the radio runs (in normal firmware, or Firmware while in recovery). Image-kind guards block
+mismatched flashes (e.g. an `ota.bin` selected for a bootloader Full, or a non-recovery image
+for Recovery). The serial-OTA client now understands both the main and recovery firmware reply
+formats, so live Firmware updates work whether the radio is in normal or recovery mode. Wi-Fi
+OTA on the same network is hardened with smaller flushed chunks and up to 3 retries to survive
 transient "broken pipe" stalls, plus cleartext-HTTP support for local radio IPs.
