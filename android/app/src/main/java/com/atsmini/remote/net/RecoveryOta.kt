@@ -21,7 +21,32 @@ object RecoveryOta {
         fun percent(value: Int)
     }
 
+    /** Upload with up to 3 attempts — a "broken pipe" mid-transfer (the radio's
+     *  async server briefly stalling under load) is usually transient. */
     fun upload(host: String, firmware: ByteArray, progress: Progress): Boolean {
+        var lastErr = ""
+        repeat(3) { attempt ->
+            if (attempt > 0) {
+                progress.status("Retrying upload (${attempt + 1}/3)…")
+                Thread.sleep(1500)
+            }
+            val r = uploadOnce(host, firmware, progress)
+            if (r.first) return true
+            lastErr = r.second
+            // A clean HTTP error (e.g. rejected image) won't improve on retry.
+            if (r.second.startsWith("Failed (HTTP")) {
+                progress.status(r.second); return false
+            }
+        }
+        progress.status(
+            "Upload failed: $lastErr\n\n" +
+            "If you're on the same Wi-Fi, the most reliable path is to boot the radio into " +
+            "recovery (hold the encoder at power-on) and use its Adhoc AP, or flash over USB."
+        )
+        return false
+    }
+
+    private fun uploadOnce(host: String, firmware: ByteArray, progress: Progress): Pair<Boolean, String> {
         val boundary = "----atsmini${System.currentTimeMillis()}"
         val url = URL("http://$host/update")
         progress.status("Connecting to $host…")
@@ -29,22 +54,26 @@ object RecoveryOta {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 10_000
-            readTimeout = 120_000
+            readTimeout = 180_000
+            // Avoid a 100-continue round trip that some embedded servers mishandle.
+            setRequestProperty("Expect", "")
+            setRequestProperty("Connection", "close")
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-            setFixedLengthStreamingMode(
-                multipartOverhead(boundary) + firmware.size
-            )
+            setFixedLengthStreamingMode(multipartOverhead(boundary) + firmware.size)
         }
         return try {
             DataOutputStream(conn.outputStream).use { out ->
                 out.writeBytes("--$boundary\r\n")
                 out.writeBytes("Content-Disposition: form-data; name=\"firmware\"; filename=\"firmware.bin\"\r\n")
                 out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
-                val chunk = 4096
+                // Smaller chunks with a flush each round let the radio's flash writes
+                // keep pace and keep the TCP window from stalling (→ broken pipe).
+                val chunk = 2048
                 var sent = 0
                 while (sent < firmware.size) {
                     val len = minOf(chunk, firmware.size - sent)
                     out.write(firmware, sent, len)
+                    out.flush()
                     sent += len
                     progress.percent(sent * 100 / firmware.size)
                 }
@@ -52,11 +81,14 @@ object RecoveryOta {
                 out.flush()
             }
             val code = conn.responseCode
-            progress.status(if (code in 200..299) "Upload complete — radio rebooting" else "Failed (HTTP $code)")
-            code in 200..299
+            if (code in 200..299) {
+                progress.status("Upload complete — radio rebooting")
+                true to ""
+            } else {
+                false to "Failed (HTTP $code)"
+            }
         } catch (e: Exception) {
-            progress.status("Upload error: ${e.message}")
-            false
+            false to (e.message ?: "connection error")
         } finally {
             conn.disconnect()
         }

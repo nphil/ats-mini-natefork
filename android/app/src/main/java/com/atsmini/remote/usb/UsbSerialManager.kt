@@ -126,6 +126,20 @@ class UsbSerialManager(private val context: Context) {
     }
 
     /**
+     * Hand the running-firmware serial port to a serial-OTA session WITHOUT
+     * resetting the device (no DTR/RTS toggling). The console reader is paused;
+     * call [resumeAfterFlash] when done (a no-op if the device rebooted away).
+     * Returns null if no port is currently open — the device must be connected
+     * and running firmware for serial OTA.
+     */
+    fun takePortForSerialOta(): UsbSerialPort? {
+        val p = port ?: return null
+        ioManager?.stop(); ioManager = null
+        runCatching { p.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE) }
+        return p
+    }
+
+    /**
      * Close the USB port silently so the device can reset without Android
      * treating it as a full disconnect (transport stays attached until caller
      * decides). Used before triggering a firmware reboot for flashing.

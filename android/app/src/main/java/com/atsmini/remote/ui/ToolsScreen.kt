@@ -157,6 +157,10 @@ private class OpControls(
         override fun status(message: String) = setStatus(message)
         override fun percent(value: Int) = setPct(value)
     }
+    val serialOtaCb = object : com.atsmini.remote.usb.SerialOta.Progress {
+        override fun status(message: String) = setStatus(message)
+        override fun percent(value: Int) = setPct(value)
+    }
     val otaCb = object : RecoveryOta.Progress {
         override fun status(message: String) = setStatus(message)
         override fun percent(value: Int) = setPct(value)
@@ -210,18 +214,31 @@ private fun DeviceHeader(onRequestUsb: () -> Unit) {
     }
 }
 
-/** Image kind selectable for USB flashing. Offset is where the ROM writes it. */
-private enum class FlashKind(val label: String, val offset: Int, val desc: String) {
-    FULL("Full", 0x0, "Erases everything including presets & saved settings. Clean install / unbrick."),
-    FIRMWARE("Firmware", 0x0, "App + bootloader; keeps presets & settings (LittleFS user data)."),
-    RECOVERY("Recovery", 0x10000, "Re-flashes only the recovery factory image at 0x10000."),
+/**
+ * Image kind selectable for USB flashing.
+ *  - [offset] is the ROM-bootloader write address (Full only).
+ *  - [serial] true means it flashes live over the running firmware's USB serial
+ *    link (no bootloader, no buttons, device reboots itself); false means it
+ *    needs the ROM bootloader / download mode (manual BOOT+RESET entry).
+ */
+private enum class FlashKind(val label: String, val offset: Int, val serial: Boolean, val desc: String) {
+    FIRMWARE("Firmware", 0x0, true,
+        "Live update over USB while the radio runs — no buttons. Writes to the spare OTA " +
+        "slot, keeps presets & settings, then reboots into the new firmware."),
+    RECOVERY("Recovery", 0x10000, true,
+        "Live update of the recovery image over USB while the radio runs in normal firmware " +
+        "(not while already in recovery). Reboots when done."),
+    FULL("Full", 0x0, false,
+        "Complete 8 MB image — erases everything incl. presets & settings. Requires the ROM " +
+        "bootloader: hold BOOT, tap RESET, release BOOT, then Flash."),
 }
 
 /** Which image kind a file/asset name corresponds to (used for cache + local picks). */
 private fun inferKind(name: String): FlashKind = when {
     name.contains("recovery", ignoreCase = true) -> FlashKind.RECOVERY
     name.contains("full", ignoreCase = true) -> FlashKind.FULL
-    else -> FlashKind.FIRMWARE
+    name.contains("flash", ignoreCase = true) -> FlashKind.FULL   // 0x0 image → bootloader
+    else -> FlashKind.FIRMWARE                                    // ota.bin → serial OTA
 }
 
 /**
@@ -229,17 +246,22 @@ private fun inferKind(name: String): FlashKind = when {
  * if the combination looks safe.  Prevents cross-partition flashing accidents.
  */
 private fun imageKindWarning(imageName: String, selectedKind: FlashKind): String? {
-    val inferred = inferKind(imageName)
+    val n = imageName.lowercase()
     return when {
-        inferred == FlashKind.RECOVERY && selectedKind != FlashKind.RECOVERY ->
-            "⚠ '$imageName' looks like a recovery image but '${selectedKind.label}' is selected. " +
-            "Recovery images must be flashed at 0x10000 — switch to Recovery kind."
-        inferred != FlashKind.RECOVERY && selectedKind == FlashKind.RECOVERY ->
-            "⚠ '$imageName' doesn't look like a recovery image. " +
-            "Recovery slot expects an '*-ospi-recovery.bin' file."
-        inferred == FlashKind.FULL && selectedKind == FlashKind.FIRMWARE ->
-            "ℹ '$imageName' is a full 8 MB image (erases LittleFS). " +
-            "To preserve settings use an '*-ospi-flash.bin' instead."
+        // Recovery slot must get a recovery image, and vice-versa.
+        n.contains("recovery") && selectedKind != FlashKind.RECOVERY ->
+            "⚠ '$imageName' is a recovery image but '${selectedKind.label}' is selected. " +
+            "Switch to Recovery."
+        !n.contains("recovery") && selectedKind == FlashKind.RECOVERY ->
+            "⚠ '$imageName' isn't a recovery image. Recovery expects an '*-ospi-recovery.bin'."
+        // Firmware = serial OTA via esp_ota, which requires the app-only ota.bin.
+        selectedKind == FlashKind.FIRMWARE && !n.contains("ota") ->
+            "⚠ '$imageName' isn't an OTA image. Firmware (serial update) needs an " +
+            "'*-ospi-ota.bin'. For a full/flash 0x0 image use Full (bootloader mode)."
+        // Full = ROM bootloader at 0x0, which needs a full/flash image, not ota.bin.
+        selectedKind == FlashKind.FULL && n.contains("ota") ->
+            "⚠ '$imageName' is an app-only OTA image. Full flashing needs an " +
+            "'*-ospi-full.bin' (or flash.bin). For an OTA image use Firmware."
         else -> null
     }
 }
@@ -297,9 +319,9 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
 
     val selectedAsset = if (source == FwSource.GITHUB) selectedRelease?.let {
         when (kind) {
-            FlashKind.FULL -> it.full()
-            FlashKind.FIRMWARE -> it.flash()
-            FlashKind.RECOVERY -> it.recovery()
+            FlashKind.FULL -> it.full()         // ROM bootloader, full 8 MB image at 0x0
+            FlashKind.FIRMWARE -> it.ota()       // serial OTA needs the app-only ota.bin
+            FlashKind.RECOVERY -> it.recovery()  // raw factory image
         }
     } else null
 
@@ -309,10 +331,12 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
         FwSource.LOCAL -> fileBytes != null
     }
 
+    val usbConnected = RadioRepository.status.collectAsStateWithLifecycle().value.transport == Transport.USB
+
     SectionCard(title = "Flash over USB cable") {
-        Text("Recovers or updates the radio with no PC. The app auto-resets the radio " +
-            "into download mode over USB from normal, recovery, or bootloader mode — " +
-            "if that fails, hold BOOT, tap RESET, release BOOT and retry.",
+        Text("Update or recover the radio with no PC. Firmware & Recovery flash live over " +
+            "USB while the radio is running — no buttons, the radio reboots itself. Full " +
+            "flashing rewrites everything and needs the ROM bootloader (BOOT+RESET).",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         Text("Image", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -322,6 +346,16 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
             }
         }
         Text(kind.desc, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        // Live (serial) flashing needs the radio connected & running; surface that.
+        if (kind.serial && !usbConnected) {
+            Text("Connect the radio (Device → Connect) and make sure it's powered on and " +
+                "running before flashing.", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+        }
+        if (!kind.serial) {
+            Text("Put the radio in bootloader mode first: hold BOOT, tap RESET, release BOOT. " +
+                "Then connect and Flash.", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
+        }
 
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(selected = source == FwSource.GITHUB, onClick = { source = FwSource.GITHUB },
@@ -397,49 +431,32 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
                         FwSource.LOCAL -> fileBytes ?: run { ctl.setStatus("No file selected"); return@launch }
                     }
 
-                    // ── Step 1: try direct ROM sync (device already in bootloader mode) ──
-                    val initialPort = Controllers.usb.takePortForFlashing()
-                        ?: run { ctl.setStatus("Connect the USB cable first"); return@launch }
-
-                    if (EspFlasher(initialPort).flash(kind.offset, bytes, ctl.flashCb, skipAutoReset = true)) {
-                        Controllers.usb.resumeAfterFlash()
-                        return@launch
-                    }
-
-                    // ── Step 2: trigger download mode, reconnect, retry ──────────────────
-                    // Send soft reboot_dl command if radio firmware is active on USB.
-                    val connectedViaUsb = RadioRepository.status.value.transport == Transport.USB
-                    if (connectedViaUsb) {
-                        ctl.setStatus("Sending download-mode command to firmware…")
-                        Controllers.usb.writeLine("{\"cmd\":\"reboot_dl\"}")
-                        delay(300) // let firmware process the command before closing
+                    if (kind.serial) {
+                        // ── Live serial OTA via the running firmware (no bootloader) ──
+                        val port = Controllers.usb.takePortForSerialOta()
+                            ?: run {
+                                ctl.setStatus("Connect the radio first (Device → Connect) and make " +
+                                    "sure it's powered on and running.")
+                                return@launch
+                            }
+                        val ok = SerialOta(port).flash(bytes, recovery = kind == FlashKind.RECOVERY, ctl.serialOtaCb)
+                        // On success the device reboots and the USB port drops; resume is a
+                        // no-op then. On failure, restore the console reader.
+                        if (!ok) Controllers.usb.resumeAfterFlash()
                     } else {
-                        ctl.setStatus("Triggering download mode via USB reset…")
+                        // ── Full image via ROM bootloader (manual BOOT+RESET entry) ──
+                        val port = Controllers.usb.takePortForFlashing()
+                            ?: run { ctl.setStatus("Connect the USB cable first"); return@launch }
+                        val ok = EspFlasher(port).flash(kind.offset, bytes, ctl.flashCb, skipAutoReset = false)
+                        Controllers.usb.resumeAfterFlash()
+                        if (!ok) ctl.setStatus(
+                            "Flash failed — make sure the radio is in bootloader mode:\n" +
+                            "hold BOOT, tap RESET, release BOOT, then Flash again."
+                        )
                     }
-                    Controllers.usb.closeForReset()
-
-                    ctl.setStatus("Waiting for device to reboot into download mode…")
-                    delay(if (connectedViaUsb) 2000L else 800L)
-
-                    val newPort = Controllers.usb.waitAndReopenForFlashing(8000L)
-                        ?: run {
-                            ctl.setStatus(
-                                "Device didn't reconnect after reset.\n\n" +
-                                "If a USB permission dialog appeared, grant it and tap Flash again.\n\n" +
-                                "Manual entry: Hold BOOT → tap RESET → release BOOT → tap Flash."
-                            )
-                            return@launch
-                        }
-
-                    val ok = EspFlasher(newPort).flash(kind.offset, bytes, ctl.flashCb, skipAutoReset = true)
-                    Controllers.usb.resumeAfterFlash()
-                    if (!ok) ctl.setStatus(
-                        "Flash failed.\n\nManual bootloader entry:\n" +
-                        "Hold BOOT → tap RESET → release BOOT → tap Flash."
-                    )
                 } finally { ctl.setBusy(false) }
             }
-        }) { Text("Flash ${kind.label} over USB") }
+        }) { Text(if (kind.serial) "Flash ${kind.label} (live)" else "Flash ${kind.label} (bootloader)") }
     }
 }
 

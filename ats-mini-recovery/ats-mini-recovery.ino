@@ -17,7 +17,6 @@
 
 #include <Arduino.h>
 #include <FS.h>
-#include "soc/rtc_cntl_reg.h"
 using namespace fs;
 #include <WiFi.h>
 #include <WebServer.h>
@@ -1288,11 +1287,6 @@ static void handleSerialCmd(const char* line) {
       wifiOK ? "connected" : adhocOn ? "ap" : "none",
       wifiOK ? WiFi.localIP().toString().c_str()
              : adhocOn ? WiFi.softAPIP().toString().c_str() : "0.0.0.0");
-  } else if (!strncmp(v, "reboot_dl", 9)) {
-    // Enter ROM download mode (USB flashing without BOOT button press).
-    Serial.println("{\"ok\":true}"); delay(300);
-    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-    esp_restart();
   } else if (!strncmp(v, "reboot", 6)) {
     Serial.println("{\"ok\":true}"); delay(300); esp_restart();
   }

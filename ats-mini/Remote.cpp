@@ -5,7 +5,68 @@
 #include "Draw.h"
 #include "Remote.h"
 #include "Storage.h"
-#include "soc/rtc_cntl_reg.h"
+#include <Update.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+
+// ── Serial firmware OTA over USB (no ROM bootloader, no reset) ───────────────
+// The running app receives a firmware image over the existing 115200 USB serial
+// link and writes it via esp_ota / Update, then reboots into the new firmware.
+// Two flavours:
+//   SOTA_FW  — app firmware → next OTA slot (Update lib auto-selects + boot-switch)
+//   SOTA_REC — recovery image → factory partition (0x10000), written in place
+//              while running from an OTA slot (factory is not the active partition)
+enum SerialOtaSt { SOTA_IDLE, SOTA_FW, SOTA_REC };
+static SerialOtaSt sOtaState = SOTA_IDLE;
+static size_t sOtaExpected = 0;
+static size_t sOtaWritten  = 0;
+static const esp_partition_t *sRecPart = nullptr;
+
+// Drain incoming serial bytes into the active OTA sink. Called every loop while
+// an OTA is in progress, so it takes over the serial input until complete.
+static void serialOtaTick(Stream *stream)
+{
+  uint8_t buf[1024];
+  while(Serial.available() && sOtaWritten < sOtaExpected)
+  {
+    size_t want = min((size_t)Serial.available(),
+                      min(sizeof(buf), sOtaExpected - sOtaWritten));
+    int n = Serial.readBytes(buf, want);
+    if(n <= 0) break;
+
+    bool ok;
+    if(sOtaState == SOTA_FW)
+      ok = (Update.write(buf, n) == (size_t)n);
+    else
+      ok = (esp_partition_write(sRecPart, sOtaWritten, buf, n) == ESP_OK);
+
+    if(!ok)
+    {
+      if(sOtaState == SOTA_FW) Update.abort();
+      stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"write\"}\r\n");
+      sOtaState = SOTA_IDLE;
+      return;
+    }
+    sOtaWritten += n;
+    if((sOtaWritten % 32768) < (size_t)n)
+      stream->printf("{\"t\":\"ota\",\"progress\":%u,\"total\":%u}\r\n",
+                     (unsigned)sOtaWritten, (unsigned)sOtaExpected);
+  }
+
+  if(sOtaWritten >= sOtaExpected)
+  {
+    bool ok;
+    if(sOtaState == SOTA_FW)
+      ok = Update.end(true);   // verifies image + sets boot partition
+    else
+      ok = true;               // recovery raw write complete
+    stream->printf("{\"t\":\"ota\",\"ok\":%s,\"bytes\":%u}\r\n",
+                   ok ? "true" : "false", (unsigned)sOtaWritten);
+    sOtaState = SOTA_IDLE;
+    if(ok) { stream->flush(); delay(600); esp_restart(); }
+  }
+}
+
 
 static void bleScanProgress(uint8_t pct)
 {
@@ -580,14 +641,45 @@ int remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json)
     return REMOTE_CHANGED;
   }
 
-  // ---- Reboot into ROM download mode (USB flashing without BOOT button) -
-  if(!strcmp(cmd, "reboot_dl"))
+  // ---- Serial OTA: app firmware → next OTA slot ------------------------
+  // Reliable USB update with no ROM bootloader: the app receives the image
+  // over serial and writes it to the inactive OTA partition, then reboots.
+  if(!strcmp(cmd, "ota_begin"))
   {
-    // Set RTC flag so the bootloader enters ROM download mode on next boot
-    // regardless of GPIO0 state. Works from any firmware mode.
-    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-    esp_restart();
-    return REMOTE_NONE; // unreachable
+    long sz = 0;
+    if(!jsonInt(json, "size", &sz) || sz <= 0)
+      { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"size\"}\r\n"); return REMOTE_CHANGED; }
+    if(!Update.begin((size_t)sz, U_FLASH))
+      { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"begin\"}\r\n"); return REMOTE_CHANGED; }
+    sOtaState = SOTA_FW; sOtaExpected = (size_t)sz; sOtaWritten = 0;
+    stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld}\r\n", sz);
+    return REMOTE_CHANGED;
+  }
+
+  // ---- Serial OTA: recovery image → factory partition (in place) -------
+  if(!strcmp(cmd, "rec_begin"))
+  {
+    long sz = 0;
+    const esp_partition_t *p = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
+    if(!jsonInt(json, "size", &sz) || sz <= 0 || !p || (size_t)sz > p->size)
+      { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"recsize\"}\r\n"); return REMOTE_CHANGED; }
+    size_t eraseSz = ((size_t)sz + 0xFFF) & ~(size_t)0xFFF;
+    if(eraseSz > p->size) eraseSz = p->size;
+    if(esp_partition_erase_range(p, 0, eraseSz) != ESP_OK)
+      { stream->print("{\"t\":\"ota\",\"ok\":false,\"err\":\"erase\"}\r\n"); return REMOTE_CHANGED; }
+    sRecPart = p; sOtaState = SOTA_REC; sOtaExpected = (size_t)sz; sOtaWritten = 0;
+    stream->printf("{\"t\":\"ota\",\"ok\":true,\"size\":%ld,\"rec\":true}\r\n", sz);
+    return REMOTE_CHANGED;
+  }
+
+  // ---- Abort an in-progress serial OTA --------------------------------
+  if(!strcmp(cmd, "ota_abort"))
+  {
+    if(sOtaState == SOTA_FW) Update.abort();
+    sOtaState = SOTA_IDLE;
+    stream->print("{\"t\":\"ota\",\"ok\":true,\"aborted\":true}\r\n");
+    return REMOTE_CHANGED;
   }
 
   // ---- Subscribe: periodic JSON status --------------------------------
@@ -1109,16 +1201,59 @@ int remoteDoCommand(Stream* stream, RemoteState* state, char key)
 
 int serialDoCommand(Stream* stream, RemoteState* state, uint8_t usbMode)
 {
-  if(usbMode == USB_OFF) return 0;
+  // An in-progress serial OTA takes over the serial input entirely, even when
+  // USB serial mode is "off" — so firmware can be flashed over USB without
+  // first enabling the serial protocol in the radio's menu.
+  if(sOtaState != SOTA_IDLE) { serialOtaTick(stream); return 0; }
 
-  if (Serial.available())
-    return remoteDoCommand(stream, state, Serial.read());
+  // Accumulate a full JSON line ({...}\n) before dispatching; single-char
+  // legacy commands (no newline) are dispatched immediately. Non-blocking:
+  // a partial JSON line is buffered across loop iterations.
+  //
+  // JSON commands (control + OTA) are honoured regardless of [usbMode] so the
+  // companion app works over USB out of the box; legacy single-char commands
+  // still require the serial protocol to be enabled (usbMode != USB_OFF).
+  static char jbuf[256];
+  static int  jlen = 0;
+  static bool inJson = false;
+
+  while(Serial.available())
+  {
+    if(!inJson)
+    {
+      if(Serial.peek() == '{') { inJson = true; jlen = 0; }
+      else
+      {
+        char c = (char)Serial.read();
+        if(usbMode == USB_OFF) continue;   // ignore stray bytes when serial off
+        return remoteDoCommand(stream, state, c);
+      }
+    }
+    char c = (char)Serial.read();
+    if(c == '\n' || c == '\r')
+    {
+      jbuf[jlen] = '\0';
+      inJson = false;
+      if(jlen > 0) return remoteDoJsonCommand(stream, state, jbuf);
+    }
+    else if(jlen < (int)sizeof(jbuf) - 1)
+    {
+      jbuf[jlen++] = c;
+    }
+    else
+    {
+      // Overflow — drop the malformed line and resync.
+      inJson = false; jlen = 0;
+    }
+  }
   return 0;
 }
 
 void serialTickTime(Stream* stream, RemoteState* state, uint8_t usbMode)
 {
   if(usbMode == USB_OFF) return;
+  // Don't inject periodic status while a serial OTA is streaming.
+  if(sOtaState != SOTA_IDLE) return;
 
   remoteTickTime(stream, state);
 }
