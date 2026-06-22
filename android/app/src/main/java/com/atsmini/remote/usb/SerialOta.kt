@@ -37,13 +37,15 @@ class SerialOta(private val port: UsbSerialPort) {
             return false
         }
 
-        val begin = waitForResult(5000, progress)
+        val begin = waitForResult(6000, progress)
         when {
             begin == null -> {
                 progress.status(
                     "No response from firmware.\n\n" +
-                    "Make sure the radio is powered on and running (not in the ROM " +
-                    "bootloader), then tap Flash again."
+                    "Live USB flashing needs firmware v2.66 or newer already on the radio. " +
+                    "Older firmware can't be flashed this way.\n\n" +
+                    "Get v2.66+ on first via Wi-Fi OTA, or via the Bootloader method " +
+                    "(hold BOOT, tap RESET, release BOOT). After that, Live flashing works."
                 )
                 return false
             }

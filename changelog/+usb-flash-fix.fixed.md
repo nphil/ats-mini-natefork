@@ -7,9 +7,11 @@ Recovery → the factory partition in place — then reboots itself into the new
 button, no download mode, and the device reliably restarts. JSON/OTA commands are now honoured
 over USB regardless of the radio's USB-serial menu setting, so it works out of the box.
 A new **Method** switch gives full computer parity: every image (Full / Firmware / Recovery)
-can also be flashed via the **ROM bootloader** (esptool-style) after manual download-mode entry
-(hold BOOT, tap RESET, release BOOT) — so you can flash from any state, including a bricked
-device or while already in recovery. **Live** serial flashing handles Firmware & Recovery while
+can also be flashed via the **ROM bootloader** (esptool-style), which now auto-enters download
+mode over the ESP32-S3's native USB-Serial/JTAG using esptool's USB-JTAG reset sequence (BOOT+RESET
+still works as a manual fallback) — so you can flash from any state, including a bricked device.
+Note: **Live** USB flashing requires firmware v2.66+ already on the radio; for older firmware use
+Wi-Fi OTA or the Bootloader method once to get there. **Live** serial flashing handles Firmware & Recovery while
 the radio runs (in normal firmware, or Firmware while in recovery). Image-kind guards block
 mismatched flashes (e.g. an `ota.bin` selected for a bootloader Full, or a non-recovery image
 for Recovery). The serial-OTA client now understands both the main and recovery firmware reply

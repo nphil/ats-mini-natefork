@@ -135,6 +135,9 @@ class UsbSerialManager(private val context: Context) {
     fun takePortForSerialOta(): UsbSerialPort? {
         val p = port ?: return null
         ioManager?.stop(); ioManager = null
+        // The reader runs on its own thread; give it a beat to actually exit so it
+        // doesn't race us for the firmware's OTA reply bytes (→ "no response").
+        runCatching { Thread.sleep(250) }
         runCatching { p.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE) }
         return p
     }

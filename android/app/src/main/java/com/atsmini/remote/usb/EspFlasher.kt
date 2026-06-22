@@ -200,24 +200,49 @@ class EspFlasher(private val port: UsbSerialPort) {
     // --- Reset sequences --------------------------------------------------------
 
     private fun enterBootloader() {
-        // Unified download-mode sequence for both UART bridges (CH340, CP210x, FTDI)
-        // and ESP32-S3 native USB-Serial/JTAG.  In both cases:
-        //   setDTR(true)  → GPIO0 = LOW  (selects ROM download mode)
-        //   setRTS(true)  → EN/CHIP_PU = LOW (reset asserted)
-        //
-        // The critical fix vs. the old code: GPIO0 must be held LOW through the
-        // moment reset is released.  The old code released GPIO0 (DTR=false) while
-        // simultaneously asserting reset, so when reset was released GPIO0 was
-        // already HIGH → chip booted normally instead of entering download mode.
-        runCatching {
-            port.setDTR(false); port.setRTS(false); sleep(50)  // idle
-            port.setDTR(true);                      sleep(100) // GPIO0 = LOW
-            port.setRTS(true);                      sleep(50)  // EN = LOW (hold in reset)
-            port.setRTS(false);                     sleep(450) // EN = HIGH, GPIO0 still LOW → download mode
-            // Extra 450 ms lets the ESP32-S3 USB re-enumerate before we try to sync.
-            port.setDTR(false)                                  // release GPIO0
+        // The ATS-Mini uses the ESP32-S3's built-in USB-Serial/JTAG, which needs
+        // esptool's USB-JTAG reset sequence (NOT the classic UART DTR/RTS one).
+        // This is how a PC enters download mode over USB with no BOOT button.
+        usbJtagReset()
+        sleep(400)              // let the chip re-enumerate as the ROM USB device
+        // Fallback for any board wired through a UART bridge (CH340/CP210x/FTDI).
+        if (!quickProbe()) {
+            uartReset()
+            sleep(400)
         }
         drain()
+    }
+
+    /** esptool USBJTAGReset: drives the S3 USB-Serial/JTAG into download mode. */
+    private fun usbJtagReset() {
+        runCatching {
+            port.setRTS(false); port.setDTR(false); sleep(100)  // idle
+            port.setDTR(true);  port.setRTS(false); sleep(100)  // assert IO0 (GPIO0 low)
+            port.setRTS(true);  port.setDTR(false); sleep(100)  // reset, IO0 still requested
+            port.setRTS(true)                                    // (Windows quirk: re-set RTS)
+            sleep(100)
+            port.setDTR(false); port.setRTS(false)               // release
+        }
+    }
+
+    /** Classic UART auto-reset (DTR→GPIO0, RTS→EN), GPIO0 held low through reset release. */
+    private fun uartReset() {
+        runCatching {
+            port.setDTR(false); port.setRTS(false); sleep(50)
+            port.setDTR(true);                      sleep(100)  // GPIO0 = LOW
+            port.setRTS(true);                      sleep(50)   // EN = LOW (hold in reset)
+            port.setRTS(false);                     sleep(50)   // EN = HIGH, GPIO0 still LOW
+            port.setDTR(false)                                   // release GPIO0
+        }
+    }
+
+    /** Single fast SYNC probe (no status spam) to see if the ROM is responding. */
+    private fun quickProbe(): Boolean {
+        val data = ByteArrayOutputStream().apply {
+            write(byteArrayOf(0x07, 0x07, 0x12, 0x20))
+            repeat(32) { write(0x55) }
+        }.toByteArray()
+        return command(ESP_SYNC, data, 0, retries = 1, timeout = 300) != null
     }
 
     // --- SYNC ------------------------------------------------------------------
