@@ -35,21 +35,34 @@ class SerialOta(private val port: UsbSerialPort) {
         // overflow). The firmware verifies it before committing the flash.
         val crc = java.util.zip.CRC32().apply { update(image) }.value.toInt()
         val cmd = if (recovery) "rec_begin" else "ota_begin"
-        progress.status("Requesting OTA slot from firmware…")
-        if (!writeLine("{\"cmd\":\"$cmd\",\"size\":${image.size},\"crc\":$crc}")) {
-            progress.status("USB write failed — is the cable connected?")
-            return false
-        }
+        val beginCmd = "{\"cmd\":\"$cmd\",\"size\":${image.size},\"crc\":$crc}"
 
-        val begin = waitForResult(6000, progress)
+        // Quiet the live status stream first so its packets don't drown the reply,
+        // then handshake. Retry a few times — the first command/reply can be lost
+        // while the port is handed over from the console reader.
+        writeLine("{\"cmd\":\"sub\",\"ms\":0}")
+        Thread.sleep(150)
+        drain()
+
+        var begin: String? = null
+        for (attempt in 1..4) {
+            progress.status("Requesting OTA slot from firmware… (try $attempt)")
+            if (!writeLine(beginCmd)) {
+                progress.status("USB write failed — is the cable connected?")
+                return false
+            }
+            begin = waitForResult(2500, progress)
+            if (begin != null) break
+            drain()
+        }
         when {
             begin == null -> {
                 progress.status(
-                    "No response from firmware.\n\n" +
-                    "Live USB flashing needs firmware v2.66 or newer already on the radio. " +
-                    "Older firmware can't be flashed this way.\n\n" +
-                    "Get v2.66+ on first via Wi-Fi OTA, or via the Bootloader method " +
-                    "(hold BOOT, tap RESET, release BOOT). After that, Live flashing works."
+                    "No response from firmware after several tries.\n\n" +
+                    "• Make sure the radio is connected (Device → Connect) and running.\n" +
+                    "• Live flashing needs firmware v2.66+ already installed.\n\n" +
+                    "Reliable fallback: use the Bootloader method (hold BOOT, tap RESET, " +
+                    "release BOOT), which flashes via the ROM loader from any state."
                 )
                 return false
             }

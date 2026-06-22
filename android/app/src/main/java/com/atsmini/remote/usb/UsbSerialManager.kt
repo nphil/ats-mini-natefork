@@ -80,6 +80,11 @@ class UsbSerialManager(private val context: Context) {
                 close()
             }
         })
+        // CRITICAL: with the default (infinite) read timeout the reader thread
+        // blocks inside read() and stop() can't release the port — it would keep
+        // consuming bytes and steal replies from a flashing/OTA session handed the
+        // same port. A finite timeout makes the thread poll and stop() prompt.
+        runCatching { io.readTimeout = 200 }
         ioManager = io
         io.start()
     }
@@ -102,6 +107,9 @@ class UsbSerialManager(private val context: Context) {
      */
     fun takePortForFlashing(): UsbSerialPort? {
         ioManager?.stop(); ioManager = null
+        // Let the reader thread observe the stop and release the port (it polls at
+        // the 200 ms read timeout) before we drive raw bytes on it.
+        runCatching { Thread.sleep(250) }
         val existing = port
         val p = if (existing != null) {
             existing
