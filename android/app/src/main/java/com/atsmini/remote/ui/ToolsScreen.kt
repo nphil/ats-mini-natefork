@@ -65,6 +65,7 @@ import com.atsmini.remote.net.RecoveryOta
 import com.atsmini.remote.shizuku.ShizukuManager
 import com.atsmini.remote.ui.components.SectionCard
 import com.atsmini.remote.usb.EspFlasher
+import com.atsmini.remote.usb.SerialOta
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
