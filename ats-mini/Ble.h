@@ -22,8 +22,13 @@ private:
   bool started;
 
   SemaphoreHandle_t dataConsumed;
-  String incomingPacket;
-  size_t unreadByteCount = 0;
+  // Binary-safe RX buffer for one notification packet. Using a raw byte buffer
+  // (not Arduino String) so embedded NUL/high bytes in a streamed firmware image
+  // survive intact — String's C-string semantics would truncate at the first NUL.
+  // Sized for the largest MTU we negotiate (517 → 514-byte payload), rounded up.
+  uint8_t rxBuf[600];
+  size_t  rxLen = 0;   // bytes currently in rxBuf
+  size_t  rxPos = 0;   // read cursor into rxBuf
 
   const char *deviceName;
 
@@ -114,7 +119,10 @@ public:
 
   void onDisconnect(BLEServer *pServer) override {
     if (!started) return;
-    xSemaphoreGive(dataConsumed);
+    rxLen = 0; rxPos = 0;            // drop any partial packet
+    xSemaphoreGive(dataConsumed);    // unblock a write that's waiting on the consumer
+    remoteOtaAbort();                // if a BLE OTA was in-flight, reset state so the next
+                                     // connection gets a clean command dispatcher
     pServer->getAdvertising()->start();
   }
 
@@ -122,9 +130,15 @@ public:
   {
     if(pCharacteristic == pRxCharacteristic)
     {
+      // Block until the previous packet has been fully read out (back-pressure):
+      // the BLE stack won't deliver the next write until we release the
+      // semaphore in read(), so a slow consumer can't drop bytes.
       xSemaphoreTake(dataConsumed, portMAX_DELAY);
-      incomingPacket = pCharacteristic->getValue();
-      unreadByteCount = incomingPacket.length();
+      size_t len = pCharacteristic->getLength();
+      if(len > sizeof(rxBuf)) len = sizeof(rxBuf);
+      memcpy(rxBuf, pCharacteristic->getData(), len);
+      rxLen = len;
+      rxPos = 0;
     }
   }
 
@@ -134,27 +148,24 @@ public:
 
   int available()
   {
-    return unreadByteCount;
+    return (int)(rxLen - rxPos);
   }
 
   int peek()
   {
-    if (unreadByteCount > 0)
-    {
-      size_t index = incomingPacket.length() - unreadByteCount;
-      return incomingPacket[index];
-    }
+    if (rxPos < rxLen)
+      return rxBuf[rxPos];
     return -1;
   }
 
   int read()
   {
-    if (unreadByteCount > 0)
+    if (rxPos < rxLen)
     {
-      size_t index = incomingPacket.length() - unreadByteCount;
-      int result = incomingPacket[index];
-      unreadByteCount--;
-      if (unreadByteCount == 0)
+      int result = rxBuf[rxPos++];
+      // Last byte consumed → release the packet slot so onWrite can accept the
+      // next notification.
+      if (rxPos >= rxLen)
         xSemaphoreGive(dataConsumed);
       return result;
     }

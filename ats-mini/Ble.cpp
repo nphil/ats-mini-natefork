@@ -40,6 +40,13 @@ int bleDoCommand(Stream* stream, RemoteState* state, uint8_t bleMode)
   if(!BLESerial.isStarted()) return 0;
   BLEServer* srv = BLEDevice::getServer();
   if(!srv || srv->getConnectedCount() == 0) return 0;
+
+  // An in-progress OTA takes over BLE input entirely — raw firmware bytes must
+  // go to the staging sink, not the JSON/char parser (mirrors serialDoCommand).
+  // Checked before the available() early-return so finalization still runs when
+  // the last block has landed but no new bytes are pending.
+  if(remoteOtaActive()) { remoteOtaPump(stream); return 0; }
+
   if(!BLESerial.available()) return 0;
 
   // JSON command: peek for opening brace, read full packet, dispatch
@@ -65,6 +72,10 @@ void remoteBLETickTime(Stream* stream, RemoteState* state, uint8_t bleMode)
   if(!BLESerial.isStarted()) return;
   BLEServer* srv = BLEDevice::getServer();
   if(!srv) return;
+
+  // Don't inject periodic status while an OTA is streaming — its packets would
+  // interleave with the raw image / ACK traffic (mirrors serialTickTime).
+  if(remoteOtaActive()) return;
 
   if (srv->getConnectedCount() > 0)
     remoteTickTime(stream, state);

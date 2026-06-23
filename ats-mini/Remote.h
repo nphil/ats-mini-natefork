@@ -24,6 +24,10 @@ typedef struct {
 } RemoteState;
 
 void remoteTickTime(Stream* stream, RemoteState* state);
+// OTA takeover hooks (shared by USB + BLE command paths)
+bool remoteOtaActive();
+void remoteOtaPump(Stream* stream);
+void remoteOtaAbort();   // reset state machine; call on BLE disconnect
 int  remoteDoCommand(Stream* stream, RemoteState* state, char key);
 int  remoteDoJsonCommand(Stream* stream, RemoteState* state, const char* json);
 void remoteJsonStatus(Stream* stream, uint8_t seq);

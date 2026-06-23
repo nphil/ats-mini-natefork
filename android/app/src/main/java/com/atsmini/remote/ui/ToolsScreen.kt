@@ -39,6 +39,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -103,6 +105,14 @@ fun ToolsScreen(onRequestUsb: () -> Unit, modifier: Modifier = Modifier) {
     var pct by remember { mutableIntStateOf(0) }
     var panel by remember { mutableIntStateOf(0) }
 
+    // Keep the screen on while a flash operation is in progress so the OS doesn't
+    // dim or lock the display mid-transfer.
+    val view = LocalView.current
+    DisposableEffect(busy) {
+        view.keepScreenOn = busy
+        onDispose { view.keepScreenOn = false }
+    }
+
     val ctl = remember {
         OpControls(
             scope = scope,
@@ -120,11 +130,13 @@ fun ToolsScreen(onRequestUsb: () -> Unit, modifier: Modifier = Modifier) {
 
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(selected = panel == 0, onClick = { panel = 0 },
-                shape = SegmentedButtonDefaults.itemShape(0, 3)) { Text("USB flash") }
+                shape = SegmentedButtonDefaults.itemShape(0, 4)) { Text("USB") }
             SegmentedButton(selected = panel == 1, onClick = { panel = 1 },
-                shape = SegmentedButtonDefaults.itemShape(1, 3)) { Text("Wi-Fi OTA") }
+                shape = SegmentedButtonDefaults.itemShape(1, 4)) { Text("BLE") }
             SegmentedButton(selected = panel == 2, onClick = { panel = 2 },
-                shape = SegmentedButtonDefaults.itemShape(2, 3)) { Text("Console") }
+                shape = SegmentedButtonDefaults.itemShape(2, 4)) { Text("Wi-Fi") }
+            SegmentedButton(selected = panel == 3, onClick = { panel = 3 },
+                shape = SegmentedButtonDefaults.itemShape(3, 4)) { Text("Console") }
         }
 
         if (busy || statusText.isNotEmpty()) {
@@ -140,7 +152,8 @@ fun ToolsScreen(onRequestUsb: () -> Unit, modifier: Modifier = Modifier) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (panel) {
                 0 -> UsbFlashPanel(busy, ctl)
-                1 -> WifiOtaPanel(busy, ctl)
+                1 -> BleFlashPanel(busy, ctl)
+                2 -> WifiOtaPanel(busy, ctl)
                 else -> ConsolePanel(onRequestUsb)
             }
         }
@@ -159,6 +172,10 @@ private class OpControls(
         override fun percent(value: Int) = setPct(value)
     }
     val serialOtaCb = object : com.atsmini.remote.usb.SerialOta.Progress {
+        override fun status(message: String) = setStatus(message)
+        override fun percent(value: Int) = setPct(value)
+    }
+    val bleOtaCb = object : com.atsmini.remote.ble.BleOta.Progress {
         override fun status(message: String) = setStatus(message)
         override fun percent(value: Int) = setPct(value)
     }
@@ -512,6 +529,167 @@ private fun UsbFlashPanel(busy: Boolean, ctl: OpControls) {
                 } finally { ctl.setBusy(false) }
             }
         }) { Text("Flash ${kind.label} (${method.label})") }
+    }
+}
+
+/**
+ * Flash over BLE — no cable, no Wi-Fi. Streams the image over the running
+ * firmware's Nordic-UART link (flow-controlled, CRC-checked) to the same staging
+ * path USB Live uses: Firmware → spare slot → recovery installs it; Recovery →
+ * factory partition. Only the "Live" model exists over BLE (no ROM bootloader),
+ * so there's no method picker and no Full image.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BleFlashPanel(busy: Boolean, ctl: OpControls) {
+    val context = LocalContext.current
+    val bleConnected = RadioRepository.status.collectAsStateWithLifecycle().value.transport == Transport.BLE
+
+    var kind by remember { mutableStateOf(FlashKind.FIRMWARE) }
+    var source by remember { mutableStateOf(FwSource.GITHUB) }
+
+    var releases by remember { mutableStateOf<List<GithubReleases.Firmware>>(emptyList()) }
+    var releasesLoading by remember { mutableStateOf(false) }
+    var releasesError by remember { mutableStateOf(false) }
+    var selectedRelease by remember { mutableStateOf<GithubReleases.Firmware?>(null) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+    var loadTrigger by remember { mutableIntStateOf(0) }
+
+    var cached by remember { mutableStateOf(com.atsmini.remote.net.FirmwareCache.list()) }
+    var selectedCache by remember { mutableStateOf<com.atsmini.remote.net.FirmwareCache.Entry?>(null) }
+    var cacheExpanded by remember { mutableStateOf(false) }
+
+    var fileName by remember { mutableStateOf<String?>(null) }
+    var fileBytes by remember { mutableStateOf<ByteArray?>(null) }
+
+    val picker = rememberLauncherForActivityResult(OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        ctl.scope.launch(Dispatchers.IO) {
+            val r = readUri(context, uri)
+            post { fileName = r?.first; fileBytes = r?.second; r?.first?.let { kind = inferKind(it) } }
+        }
+    }
+
+    LaunchedEffect(loadTrigger, source) {
+        if (source != FwSource.GITHUB || releases.isNotEmpty()) return@LaunchedEffect
+        releasesLoading = true; releasesError = false
+        val result = kotlinx.coroutines.withContext(Dispatchers.IO) { GithubReleases.listFirmware(15) }
+        releasesLoading = false
+        if (result.isEmpty()) releasesError = true
+        else { releases = result; if (selectedRelease == null) selectedRelease = result.firstOrNull() }
+    }
+    LaunchedEffect(source) { if (source == FwSource.CACHED) cached = com.atsmini.remote.net.FirmwareCache.list() }
+
+    // BLE uses the Live model: app-only image for Firmware, recovery image for Recovery.
+    val selectedAsset = if (source == FwSource.GITHUB)
+        selectedRelease?.let { assetFor(it, kind, FlashMethod.LIVE) } else null
+
+    val canFlash = !busy && bleConnected && when (source) {
+        FwSource.GITHUB -> selectedAsset != null
+        FwSource.CACHED -> selectedCache != null
+        FwSource.LOCAL -> fileBytes != null
+    }
+
+    SectionCard(title = "Flash over BLE (no cable)") {
+        Text("Streams the image over the radio's Bluetooth link to the same staging path as " +
+            "USB Live — flow-controlled and CRC-checked. Slower than USB (~1–2 min); keep the " +
+            "phone near the radio and don't power off during install.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        if (!bleConnected) Text(
+            "Not connected over BLE. Pair/connect the radio first (Settings → Scan).",
+            fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+
+        Text("Image", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(FlashKind.FIRMWARE, FlashKind.RECOVERY).forEach { k ->
+                FilterChip(selected = kind == k, label = { Text(k.label) }, onClick = { kind = k })
+            }
+        }
+        Text(
+            if (kind == FlashKind.RECOVERY)
+                "Recovery image → factory partition (in place). Radio reboots when done."
+            else
+                "Firmware → spare slot; the radio reboots into recovery and installs it to the boot " +
+                "slot automatically. Watch the radio screen; it reboots a couple of times.",
+            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(selected = source == FwSource.GITHUB, onClick = { source = FwSource.GITHUB },
+                shape = SegmentedButtonDefaults.itemShape(0, 3)) { Text("GitHub") }
+            SegmentedButton(selected = source == FwSource.CACHED, onClick = { source = FwSource.CACHED },
+                shape = SegmentedButtonDefaults.itemShape(1, 3)) { Text("Cached") }
+            SegmentedButton(selected = source == FwSource.LOCAL, onClick = { source = FwSource.LOCAL },
+                shape = SegmentedButtonDefaults.itemShape(2, 3)) { Text("Local file") }
+        }
+
+        when (source) {
+            FwSource.GITHUB -> when {
+                releasesLoading -> Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.height(20.dp))
+                    Text("Loading releases…", fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                releasesError -> {
+                    Text("Failed to load releases. Try the Cached tab if offline.",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    OutlinedButton(onClick = { releasesError = false; loadTrigger++ }) { Text("Retry") }
+                }
+                else -> {
+                    ReleaseDropdown(releases, selectedRelease, dropdownExpanded,
+                        onExpand = { dropdownExpanded = it },
+                        onSelect = { selectedRelease = it; dropdownExpanded = false })
+                    if (selectedAsset != null) Text("${selectedAsset.name}  (${selectedAsset.size / 1024} KB)",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    else if (selectedRelease != null) Text("No ${kind.label} image for this release",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            FwSource.CACHED -> CacheDropdown(cached, selectedCache, cacheExpanded,
+                onExpand = { cacheExpanded = it },
+                onSelect = { selectedCache = it; cacheExpanded = false; kind = inferKind(it.name) })
+            FwSource.LOCAL -> FilePickerRow(label = "Firmware .bin (${kind.label})", fileName = fileName,
+                onPick = { picker.launch(arrayOf("application/octet-stream", "*/*")) })
+        }
+
+        val validationWarning = when (source) {
+            FwSource.GITHUB -> selectedAsset?.name?.let { imageKindWarning(it, kind, FlashMethod.LIVE) }
+            FwSource.CACHED -> selectedCache?.name?.let { imageKindWarning(it, kind, FlashMethod.LIVE) }
+            FwSource.LOCAL -> fileName?.let { imageKindWarning(it, kind, FlashMethod.LIVE) }
+        }
+        if (validationWarning != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Text(validationWarning, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+            }
+        }
+
+        Button(enabled = canFlash && validationWarning == null, modifier = Modifier.fillMaxWidth(), onClick = {
+            ctl.setBusy(true); ctl.setStatus("Preparing…"); ctl.setPct(0)
+            ctl.scope.launch(Dispatchers.IO) {
+                try {
+                    val bytes = when (source) {
+                        FwSource.GITHUB -> {
+                            val asset = selectedAsset ?: run { ctl.setStatus("No asset available"); return@launch }
+                            ctl.setStatus("Fetching ${asset.name}…")
+                            GithubReleases.downloadCached(asset) { ctl.setPct(it) }
+                                ?: run { ctl.setStatus("Download failed — try Cached if offline"); return@launch }
+                        }
+                        FwSource.CACHED -> {
+                            val e = selectedCache ?: run { ctl.setStatus("No cached image selected"); return@launch }
+                            com.atsmini.remote.net.FirmwareCache.read(e.name)
+                                ?: run { ctl.setStatus("Cached file unreadable"); return@launch }
+                        }
+                        FwSource.LOCAL -> fileBytes ?: run { ctl.setStatus("No file selected"); return@launch }
+                    }
+                    com.atsmini.remote.ble.BleOta(Controllers.ble)
+                        .flash(bytes, recovery = kind == FlashKind.RECOVERY, ctl.bleOtaCb)
+                } finally { ctl.setBusy(false) }
+            }
+        }) { Text("Flash ${kind.label} over BLE") }
     }
 }
 

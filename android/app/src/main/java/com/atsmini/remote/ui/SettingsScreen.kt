@@ -62,31 +62,48 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ConnectionCard() {
-    val status by RadioRepository.status.collectAsStateWithLifecycle()
     val scanning by Controllers.ble.scanning.collectAsStateWithLifecycle()
     val devices by Controllers.ble.devices.collectAsStateWithLifecycle()
+    val connectedDevice by Controllers.ble.connectedDevice.collectAsStateWithLifecycle()
+
     SectionCard(title = "Connection") {
-        Text(status.connectionStatus, fontWeight = FontWeight.SemiBold,
-            color = if (status.isConnected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { Controllers.ble.startScan() }, enabled = !scanning, modifier = Modifier.weight(1f)) {
-                Text(if (scanning) "Scanning…" else "Scan BLE")
-            }
-            OutlinedButton(
-                onClick = { Controllers.ble.disconnect(); Controllers.usb.close() },
-                enabled = status.isConnected,
-                modifier = Modifier.weight(1f),
-            ) { Text("Disconnect") }
-        }
-        devices.forEach { dev ->
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        if (connectedDevice != null) {
+            // Connected: show which device is connected + Disconnect only.
             Row(
-                Modifier.fillMaxWidth().clickable { Controllers.ble.connect(dev.address) }.padding(vertical = 6.dp),
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(dev.name)
-                Text("Connect", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Connected to", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(connectedDevice!!.name, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.secondary)
+                }
+                OutlinedButton(onClick = { Controllers.ble.disconnect(); Controllers.usb.close() }) {
+                    Text("Disconnect")
+                }
+            }
+        } else {
+            // Disconnected: scan button + discovered device list (Connect button only, no whole-row tap).
+            Button(
+                onClick = { Controllers.ble.startScan() },
+                enabled = !scanning,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (scanning) "Scanning…" else "Scan BLE")
+            }
+            devices.forEach { dev ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(dev.name, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { Controllers.ble.connect(dev.address) }) {
+                        Text("Connect")
+                    }
+                }
             }
         }
     }
