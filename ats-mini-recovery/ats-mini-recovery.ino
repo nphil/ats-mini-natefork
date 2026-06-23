@@ -267,6 +267,15 @@ enum SerialSt { SS_IDLE, SS_OTA, SS_REC };
 static SerialSt sst = SS_IDLE;
 static size_t sOtaExp = 0;
 
+// Flow control: the host streams one block, then waits for our {"ack":N} before
+// sending the next. Without this the host outruns the 256-byte USB-CDC RX buffer
+// and bytes are dropped → the transfer never completes (stuck on "finalizing").
+// This mirrors the main firmware's serial OTA; the block size is sent to the host
+// in the begin reply. sOtaAcked / recAcked track the byte count of the last ack.
+#define SOTA_BLOCK 4096u
+static size_t sOtaAcked = 0;
+static size_t recAcked  = 0;
+
 // Stage-1 (receive new recovery into ota_1) state.
 static esp_ota_handle_t       recH = 0;
 static const esp_partition_t* recPart = nullptr;
@@ -1515,8 +1524,8 @@ static void handleSerialCmd(const char* line) {
     size_t sz = sk ? (size_t)atol(sk + 7) : 0;
     if (!sz) { Serial.println("{\"ok\":false,\"err\":\"no size\"}"); return; }
     if (!otaBegin(sz)) { Serial.println("{\"ok\":false,\"err\":\"begin\"}"); return; }
-    sst = SS_OTA; sOtaExp = sz;
-    Serial.printf("{\"ok\":true,\"size\":%u}\n", (unsigned)sz);
+    sst = SS_OTA; sOtaExp = sz; sOtaAcked = 0;
+    Serial.printf("{\"ok\":true,\"size\":%u,\"block\":%u}\n", (unsigned)sz, SOTA_BLOCK);
   } else if (!strncmp(v, "rec_begin", 9)) {
     // Stage 1: receive a new recovery image into ota_1. The actual factory
     // install (stage 2) happens after reboot, running the new recovery from
@@ -1534,8 +1543,8 @@ static void handleSerialCmd(const char* line) {
       Serial.println("{\"ok\":false,\"err\":\"begin\"}"); return;
     }
     recExp = sz; recWritten = 0; recCrcRun = 0xFFFFFFFFu; recCrcExp = crc; recOn = true;
-    sst = SS_REC;
-    Serial.printf("{\"ok\":true,\"size\":%u,\"rec\":true}\n", (unsigned)sz);
+    recAcked = 0; sst = SS_REC;
+    Serial.printf("{\"ok\":true,\"size\":%u,\"rec\":true,\"block\":%u}\n", (unsigned)sz, SOTA_BLOCK);
   } else if (!strncmp(v, "ota_abort", 9)) {
     if (recOn) { esp_ota_abort(recH); recOn = false; }
     otaAbortAll(); sst = SS_IDLE; Serial.println("{\"ok\":true}");
@@ -1556,10 +1565,17 @@ static void handleSerial() {
       size_t want = min((size_t)Serial.available(), min(sizeof(buf), sOtaExp - otaWritten));
       int n = Serial.readBytes(buf, want); if (n <= 0) break;
       if (!otaWrite(buf, n)) { sst = SS_IDLE; Serial.println("{\"ok\":false,\"err\":\"write\"}"); return; }
-      if ((otaWritten % 32768) < (size_t)n)
-        Serial.printf("{\"progress\":%u,\"total\":%u}\n", (unsigned)otaWritten, (unsigned)sOtaExp);
+      // Ack each completed block (and the final partial one). The host blocks
+      // until it sees an ack covering what it sent, so the RX buffer can't overrun.
+      if (otaWritten - sOtaAcked >= SOTA_BLOCK || otaWritten >= sOtaExp) {
+        sOtaAcked = otaWritten;
+        Serial.printf("{\"t\":\"ota\",\"ack\":%u,\"total\":%u}\n", (unsigned)otaWritten, (unsigned)sOtaExp);
+      }
     }
     if (otaWritten >= sOtaExp) {
+      // Heartbeat: image received, now validating (esp_ota_end runs SHA-256, slow
+      // at 80 MHz). Keeps the host waiting and proves we reached finalization.
+      Serial.println("{\"t\":\"ota\",\"fin\":1}"); Serial.flush();
       bool ok = otaFinish(); sst = SS_IDLE;
       Serial.printf("{\"ok\":%s,\"bytes\":%u}\n", ok ? "true":"false", (unsigned)otaWritten);
       if (ok) { delay(1000); esp_restart(); }
@@ -1575,11 +1591,16 @@ static void handleSerial() {
       }
       recCrcRun = crc32Run(recCrcRun, rbuf, n);
       recWritten += n;
-      if ((recWritten % 32768) < (size_t)n)
-        Serial.printf("{\"progress\":%u,\"total\":%u}\n", (unsigned)recWritten, (unsigned)recExp);
+      // Per-block ack (see SS_OTA): paces the host so the RX buffer can't overrun.
+      if (recWritten - recAcked >= SOTA_BLOCK || recWritten >= recExp) {
+        recAcked = recWritten;
+        Serial.printf("{\"t\":\"ota\",\"ack\":%u,\"total\":%u}\n", (unsigned)recWritten, (unsigned)recExp);
+      }
     }
     if (recWritten >= recExp) {
       sst = SS_IDLE; recOn = false;
+      // Heartbeat before the slow esp_ota_end (SHA-256) so the host keeps waiting.
+      Serial.println("{\"t\":\"ota\",\"fin\":1}"); Serial.flush();
       uint32_t crc = recCrcRun ^ 0xFFFFFFFFu;
       bool crcOk = (recCrcExp == 0 || crc == recCrcExp);
       bool endOk = (esp_ota_end(recH) == ESP_OK);
@@ -1858,6 +1879,9 @@ void setup() {
   // Fix Core 3.3.10 IPC1 crash: install ISR service before any attachInterrupt
   gpio_install_isr_service(0);
 
+  // Grow the USB-CDC RX buffer (default 256 B) so a full 4 KB serial-OTA block
+  // fits without dropping bytes. Must precede Serial.begin(). Matches main fw.
+  Serial.setRxBufferSize(8192);
   Serial.begin(115200);
   Serial.println("{\"mode\":\"recovery\",\"fw\":2}");
 
