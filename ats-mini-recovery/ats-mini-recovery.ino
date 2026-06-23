@@ -1,8 +1,10 @@
 /*
  * ATS-Mini Recovery Firmware — Dracula UI, encoder navigation
  *
- * Boot trigger: hold encoder button during KQ4TXO splash → recovery UI.
- * Otherwise auto-boots main firmware after 2s. Boot-loop detection at 3 fails.
+ * Boot trigger: hold the encoder button at power-on → recovery UI. There is no
+ * splash and no countdown — if the button isn't held, recovery silently forwards
+ * to the main firmware so the radio appears to boot straight to it. Boot-loop
+ * detection at 3 fails also keeps the device in recovery.
  *
  * Main menu: Boot / Erase Data / Network / Reboot
  * Network:   WiFi Scan → keyboard → connect | OTA list | Web Server | Back
@@ -645,36 +647,36 @@ static void installStagedFirmware() {
   delay(3000);
 }
 
+// No splash, no countdown. Recovery runs on every power-on (the bootloader always
+// lands on factory because the main app erases otadata each boot), so to make the
+// radio look like it boots "straight to firmware" this path stays silent and
+// forwards to ota_0 immediately. We enter the recovery UI ONLY when:
+//   • the factory image is known-bad (can't safely hand off), or
+//   • a boot-loop is detected (bootcount >= 3), or
+//   • the user is holding the encoder button at power-on.
 static bool splashAndDecide() {
   // If factory is known-damaged, never auto-forward to the main app.
   if (gFacBad) return true;
-
-  tft.fillScreen(D_BG);
-
-  tft.setTextColor(D_CYAN, D_BG);
-  tft.setTextFont(4);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("KQ4TXO", W / 2, 52);
-
-  tft.setTextColor(D_PURPLE, D_BG);
-  tft.setTextFont(2);
-  tft.drawString("ATS-Mini Recovery", W / 2, 88);
-
-  tft.setTextColor(D_YELLOW, D_BG);
-  tft.setTextFont(1);
-  tft.drawString("Press encoder to enter recovery", W / 2, 112);
 
   Preferences bc;
   bc.begin("recovery", false, "settings");
   int bootCount = bc.getInt("bootcount", 0);
   bc.end();
+
+  // Boot-loop guard: the main app failed to reset bootcount 3 boots running →
+  // stay in recovery and say so rather than forwarding into a crash loop. This is
+  // the only boot-time screen recovery draws now.
   if (bootCount >= 3) {
-    tft.setTextColor(D_RED, D_BG);
-    tft.setTextFont(1);
+    tft.fillScreen(D_BG);
     tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(D_CYAN, D_BG);
+    tft.setTextFont(4);
+    tft.drawString("ATS-Mini Recovery", W / 2, 60);
+    tft.setTextColor(D_RED, D_BG);
+    tft.setTextFont(2);
     char buf[40];
-    snprintf(buf, sizeof(buf), "Boot-loop x%d detected!", bootCount);
-    tft.drawString(buf, W / 2, 128);
+    snprintf(buf, sizeof(buf), "Boot-loop x%d detected", bootCount);
+    tft.drawString(buf, W / 2, 100);
     Preferences bc2;
     bc2.begin("recovery", false, "settings");
     bc2.putInt("bootcount", 0);
@@ -682,33 +684,29 @@ static bool splashAndDecide() {
     return true;
   }
 
-  bool held = (digitalRead(PIN_BTN) == LOW);
-  uint32_t start = millis();
-  while (!held && millis() - start < 2000) {
-    uint32_t elapsed = millis() - start;
-    int fill = (int)((uint64_t)elapsed * (W - 24) / 2000);
-    tft.fillRect(12, 145, fill, 10, D_COMMENT);
-    tft.drawRect(12, 145, W - 24, 10, D_LINE);
-    if (digitalRead(PIN_BTN) == LOW) { held = true; break; }
-    delay(20);
+  // Hold-to-enter: the user must already be holding the encoder at power-on.
+  // Confirm a genuine hold (not a bounce) by requiring a steady LOW across a brief
+  // window. When the button isn't held the first read returns HIGH and we bail
+  // immediately — so the common fast path adds no delay and draws nothing.
+  bool held = true;
+  for (int i = 0; i < 8; i++) {
+    if (digitalRead(PIN_BTN) != LOW) { held = false; break; }
+    delay(10);
   }
+  if (held) return true;   // enter recovery UI
 
-  if (!held) {
-    Preferences bc3;
-    bc3.begin("recovery", false, "settings");
-    bc3.putInt("bootcount", bootCount + 1);
-    bc3.end();
+  // Fast path: silently forward to the main app, leaving the screen black so it
+  // looks like a normal straight-to-firmware boot.
+  Preferences bc3;
+  bc3.begin("recovery", false, "settings");
+  bc3.putInt("bootcount", bootCount + 1);
+  bc3.end();
 
-    const esp_partition_t* p = getOta0();
-    if (p && esp_ota_set_boot_partition(p) == ESP_OK) {
-      tft.setTextColor(D_GREEN, D_BG);
-      tft.setTextFont(1);
-      tft.drawString("Booting...", W / 2, 162);
-      delay(200);
-      esp_restart();
-    }
-  }
+  const esp_partition_t* p = getOta0();
+  if (p && esp_ota_set_boot_partition(p) == ESP_OK) esp_restart();
 
+  // Couldn't set the boot slot → drop into the recovery UI rather than hang on a
+  // black screen.
   return true;
 }
 
@@ -1896,7 +1894,8 @@ void setup() {
   // Also reboots into the new firmware when done; on failure it falls through.
   installStagedFirmware();
 
-  // Splash + boot decision (boots main firmware unless encoder held / boot-loop)
+  // Boot decision (no splash): forwards to the main firmware unless the encoder
+  // is held at power-on or a boot-loop is detected.
   splashAndDecide();
 
   // Bring networking up in the background — AP is instant, STA connects async.
