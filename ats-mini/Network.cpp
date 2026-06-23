@@ -14,6 +14,7 @@
 #include <ESPmDNS.h>
 #include <Update.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
 
 #define CONNECT_TIME  3000  // Time of inactivity to start connecting WiFi
 
@@ -107,6 +108,12 @@ char *getWiFiIPAddress()
   return strcpy(ip, WiFi.status()==WL_CONNECTED ? WiFi.localIP().toString().c_str() : "");
 }
 
+// WiFi link signal strength in dBm (STA connected), or 0 when not connected.
+int getWiFiRSSI()
+{
+  return WiFi.status()==WL_CONNECTED ? (int)WiFi.RSSI() : 0;
+}
+
 // Returns the best IP for HTTP OTA: STA IP when connected to a router,
 // AP IP when the device is acting as an access point.
 char *getOTAIPAddress()
@@ -161,6 +168,19 @@ void netInit(uint8_t netMode, bool showStatus)
   }
 
   WiFi.setAutoReconnect(true);
+
+  // ── Radio tuning for marginal-signal reliability ──────────────────────────
+  // The device often sits in a metal enclosure with a weak link to the router.
+  // These settings maximise the link budget at the cost of throughput (fine for
+  // a control/telemetry link):
+  //  - disable modem power-save so the radio doesn't nap between beacons and
+  //    miss packets / drop a marginal association;
+  //  - request maximum TX power for the uplink to the router;
+  //  - force 802.11b-only PHY: its lowest data rates use the most robust
+  //    modulation, ~3-5 dB better sensitivity/range than b/g/n.
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
 
   // Initialize WiFi and try connecting to a network
   if(netMode != NET_OFF && wifiConnect())
@@ -331,7 +351,8 @@ static bool wifiConnect()
   drawScreen(status.c_str());
 
   // If failed connecting to WiFi network...
-  if (wifiMulti.run() != WL_CONNECTED)
+  // Longer timeout (default is 5 s) so a weak/distant AP has time to associate.
+  if (wifiMulti.run(10000) != WL_CONNECTED)
   {
     // WiFi connection failed
     drawScreen(status.c_str(), "No WiFi connection");

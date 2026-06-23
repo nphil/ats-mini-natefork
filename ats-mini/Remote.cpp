@@ -631,11 +631,12 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
     if(added > 0) n += added;
   }
 
-  // Append WiFi info for OTA: wip=best IP to POST firmware to, wm=mode
+  // Append WiFi info for OTA: wip=best IP to POST firmware to, wm=mode,
+  // wr=WiFi link RSSI in dBm (0 when not STA-connected)
   if(n > 0) {
     int added = snprintf(buf + n, sizeof(buf) - n,
-      ",\"wip\":\"%s\",\"wm\":%d,\"fw\":%u",
-      getOTAIPAddress(), (int)getWiFiStatus(), (unsigned)VER_APP);
+      ",\"wip\":\"%s\",\"wm\":%d,\"wr\":%d,\"fw\":%u",
+      getOTAIPAddress(), (int)getWiFiStatus(), getWiFiRSSI(), (unsigned)VER_APP);
     if(added > 0) n += added;
   }
 

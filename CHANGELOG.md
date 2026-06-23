@@ -4,6 +4,31 @@ The user manual is available at <https://esp32-si4732.github.io/ats-mini/manual.
 
 <!-- towncrier release notes start -->
 
+## 2.75 (2026-06-23)
+
+### Added
+
+- **WiFi link RSSI in the status telemetry (`wr`).** The JSON status now reports the
+  WiFi connection signal strength in dBm (`wr`, 0 when not STA-connected), alongside
+  the existing radio RSSI (`r`). This lets you measure actual link quality — e.g.
+  enclosure-on vs enclosure-off — to diagnose reception problems. Verified live over
+  serial: a device in an aluminium enclosure read −95 dBm (at the noise floor),
+  confirming the enclosure as the dominant reception limit.
+
+### Fixed
+
+- **WiFi reliability at marginal signal.** `netInit()` now tunes the radio for link
+  budget over throughput (appropriate for a control/telemetry link):
+  - `WiFi.setSleep(false)` — disables modem power-save so the radio no longer naps
+    between beacons and drops a weak association or misses packets.
+  - `WiFi.setTxPower(WIFI_POWER_19_5dBm)` — maximum uplink TX power to the router.
+  - Forces **802.11b-only** PHY — its lowest data rates use the most robust modulation,
+    ~3–5 dB better sensitivity/range than b/g/n. Confirmed it allowed association at
+    −95 dBm where the default PHY would likely have failed. (Trade-off: APs that have
+    disabled legacy 11b rates won't accept the device; standard home routers do.)
+  - Raises the `wifiMulti.run()` connect timeout from 5 s to 10 s so a weak/distant AP
+    has time to associate.
+
 ## 2.62 (2026-06-21)
 
 ### Fixed

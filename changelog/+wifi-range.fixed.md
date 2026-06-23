@@ -1,0 +1,1 @@
+WiFi reliability at marginal signal: disable modem power-save (`setSleep(false)`), max TX power, force 802.11b-only PHY (~3-5 dB better range), and raise the connect timeout to 10 s. Confirmed association at -95 dBm where the default PHY would likely fail.
