@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -45,17 +47,40 @@ import com.atsmini.remote.data.RadioRepository
 import com.atsmini.remote.data.RadioStatus
 import com.atsmini.remote.ui.components.Haptics
 import com.atsmini.remote.ui.components.SectionCard
+import com.atsmini.remote.ui.components.SpectrumChart
 
 @Composable
 fun RadioScreen(modifier: Modifier = Modifier) {
     val status by RadioRepository.status.collectAsStateWithLifecycle()
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         FrequencyCard(status)
         ControlsCard(status)
+        SpectrumCard(status)
         SignalCard(status)
+    }
+}
+
+@Composable
+private fun SpectrumCard(status: RadioStatus) {
+    val scan by RadioRepository.scan.collectAsStateWithLifecycle()
+    val progress by RadioRepository.scanProgress.collectAsStateWithLifecycle()
+    val view = LocalView.current
+    SectionCard(title = "Spectrum") {
+        // Compact, controls-free chart: the tuned-frequency marker tracks the live
+        // status, so it slides in real time as you tune above. Drag to inspect bins.
+        SpectrumChart(
+            scan = scan,
+            tunedFreq = status.frequency,
+            isFM = status.isFM,
+            progress = progress,
+            height = 150.dp,
+            showControls = false,
+            onScan = { Haptics.medium(view); RadioRepository.send(Protocol.scan(1)) },
+        )
     }
 }
 

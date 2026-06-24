@@ -692,9 +692,15 @@ void remoteJsonStatus(Stream *stream, uint8_t seq)
   stream->write((uint8_t*)buf, n);
 }
 
-// Stream the last completed scan as a JSON object.
-// Data is sent in small chunks (~100 bytes each) to stay within BLE MTU limits.
-#define SCAN_CHUNK 100
+// Stream the last completed scan as a single JSON object.
+//
+// The whole packet is assembled in one buffer and emitted with ONE stream->write().
+// This is critical over BLE: NordicUART::write() paces its own MTU-sized chunks
+// (12 ms apart), so a single write streams reliably. The previous approach — ~75
+// tiny back-to-back write() calls — fired unpaced notifications that overran the
+// BLE stack buffer and were silently dropped, so the app never assembled a complete
+// object and its scan progress stuck near the end. 200 points × 2 arrays + channels
+// fits comfortably in ~1.9 KB.
 static void remoteJsonScanData(Stream *stream)
 {
   if(!scanIsDone())
@@ -704,50 +710,31 @@ static void remoteJsonScanData(Stream *stream)
   }
 
   uint16_t n = scanGetCount();
-  static char buf[SCAN_CHUNK + 16];
-  int pos;
+  static char buf[2400];
+  int pos = 0;
 
-  // Header
-  pos = snprintf(buf, sizeof(buf),
+  pos += snprintf(buf + pos, sizeof(buf) - pos,
     "{\"t\":\"scan\",\"sf\":%u,\"step\":%u,\"n\":%u,\"r\":[",
     scanGetStartFreq(), scanGetStep(), n);
+
+  for(uint16_t i = 0; i < n && pos < (int)sizeof(buf) - 8; i++)
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", i ? "," : "", scanGetRawRSSI(i));
+
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"sn\":[");
+  for(uint16_t i = 0; i < n && pos < (int)sizeof(buf) - 8; i++)
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", i ? "," : "", scanGetRawSNR(i));
+
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"ch\":[");
+  for(uint8_t i = 0; i < scanChannels.count && pos < (int)sizeof(buf) - 12; i++)
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", i ? "," : "", scanChannels.freq[i]);
+
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "]}\r\n");
+
+  // snprintf returns the untruncated length; clamp so a (theoretical) full buffer
+  // never makes us read past the end. 200 points fit in ~1.9 KB << 2400, so this
+  // is belt-and-suspenders.
+  if(pos > (int)sizeof(buf)) pos = sizeof(buf);
   stream->write((uint8_t*)buf, pos);
-
-  // RSSI array in chunks
-  for(uint16_t i = 0; i < n; )
-  {
-    pos = 0;
-    while(i < n && pos < SCAN_CHUNK)
-    {
-      pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", (i > 0) ? "," : "", scanGetRawRSSI(i));
-      i++;
-    }
-    stream->write((uint8_t*)buf, pos);
-    delay(5);
-  }
-
-  // SNR array
-  stream->print("],\"sn\":[");
-  for(uint16_t i = 0; i < n; )
-  {
-    pos = 0;
-    while(i < n && pos < SCAN_CHUNK)
-    {
-      pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%u", (i > 0) ? "," : "", scanGetRawSNR(i));
-      i++;
-    }
-    stream->write((uint8_t*)buf, pos);
-    delay(5);
-  }
-
-  // Channel list and close
-  stream->print("],\"ch\":[");
-  for(uint8_t i = 0; i < scanChannels.count; i++)
-  {
-    pos = snprintf(buf, sizeof(buf), "%s%u", i ? "," : "", scanChannels.freq[i]);
-    stream->write((uint8_t*)buf, pos);
-  }
-  stream->print("]}\r\n");
 }
 
 //

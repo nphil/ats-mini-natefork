@@ -61,6 +61,59 @@ class BleManager(private val context: Context) {
     @Volatile private var writeLatch: CountDownLatch? = null
     @Volatile private var writeStatus = BluetoothGatt.GATT_FAILURE
 
+    // --- Serialized GATT operation queue ----------------------------------------
+    // Android permits only ONE outstanding GATT operation per connection: issuing a
+    // second writeCharacteristic/writeDescriptor before the previous one's callback
+    // fires silently drops it. On connect we enable notifications (a descriptor
+    // write) and then send several setup commands back-to-back — without this queue
+    // all but the first are lost, so the radio never starts streaming status. Every
+    // normal write goes through here and waits for its completion callback before the
+    // next starts. (The OTA path uses writeChunkBlocking instead, which has its own
+    // latch and only runs while this queue is idle.)
+    private val gattOps = ArrayDeque<() -> Boolean>()
+    @Volatile private var opInFlight = false
+    private var opGen = 0
+
+    private fun enqueueOp(op: () -> Boolean) {
+        main.post { gattOps.addLast(op); processNextOp() }
+    }
+
+    private fun processNextOp() {
+        if (opInFlight) return
+        val op = gattOps.removeFirstOrNull() ?: return
+        opInFlight = true
+        opGen++
+        val myGen = opGen
+        // Safety net: if the stack never calls back, don't wedge the queue forever.
+        main.postDelayed({
+            if (opInFlight && opGen == myGen) { opInFlight = false; processNextOp() }
+        }, 2_500)
+        val started = runCatching { op() }.getOrDefault(false)
+        if (!started) { opInFlight = false; processNextOp() }
+    }
+
+    /** Called from write/descriptor completion callbacks to advance the queue. */
+    private fun onOpComplete() {
+        main.post { if (opInFlight) { opInFlight = false; opGen++; processNextOp() } }
+    }
+
+    private fun clearOps() {
+        main.post { gattOps.clear(); opInFlight = false; opGen++ }
+    }
+
+    private fun writeCharCompat(
+        g: BluetoothGatt, c: BluetoothGattCharacteristic, bytes: ByteArray,
+    ): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        g.writeCharacteristic(c, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+            android.bluetooth.BluetoothStatusCodes.SUCCESS
+    } else {
+        @Suppress("DEPRECATION") run {
+            c.value = bytes
+            c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            g.writeCharacteristic(c)
+        }
+    }
+
     /** True once connected with the Nordic UART RX characteristic resolved. */
     val isReady: Boolean get() = gatt != null && rxChar != null
 
@@ -132,6 +185,7 @@ class BleManager(private val context: Context) {
         gatt?.close()
         gatt = null
         rxChar = null
+        clearOps()
         RadioRepository.log("Connecting to ${device.name ?: device.address}…")
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
@@ -149,19 +203,14 @@ class BleManager(private val context: Context) {
     }
 
     fun send(line: String) {
+        // While a BLE OTA is streaming, the dedicated writeChunkBlocking path owns
+        // the link and the firmware ignores normal commands. Suppress queued sends
+        // so nothing competes with the flash for the single GATT operation slot.
+        if (otaRxListener != null) return
         val g = gatt ?: return
         val c = rxChar ?: return
         val bytes = (line + "\n").toByteArray()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(c, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        } else {
-            @Suppress("DEPRECATION")
-            c.value = bytes
-            @Suppress("DEPRECATION")
-            c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            @Suppress("DEPRECATION")
-            g.writeCharacteristic(c)
-        }
+        enqueueOp { writeCharCompat(g, c, bytes) }
     }
 
     /**
@@ -197,11 +246,23 @@ class BleManager(private val context: Context) {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 prefs.edit().putString(KEY_LAST, g.device.address).apply()
+                // Prefer the 2M PHY (Android 8+): ~2× throughput, helps both status
+                // streaming and OTA. Falls back silently if the link can't do 2M.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    runCatching {
+                        g.setPreferredPhy(
+                            BluetoothDevice.PHY_LE_2M_MASK,
+                            BluetoothDevice.PHY_LE_2M_MASK,
+                            BluetoothDevice.PHY_OPTION_NO_PREFERRED,
+                        )
+                    }
+                }
                 g.requestMtu(517)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 rxChar = null
                 gatt = null
                 _connectedDevice.value = null
+                clearOps()
                 RadioRepository.detachTransport()
                 if (autoReconnect) main.postDelayed({ startScan() }, 1_500)
             }
@@ -215,7 +276,12 @@ class BleManager(private val context: Context) {
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
             writeStatus = status
-            writeLatch?.countDown()
+            writeLatch?.countDown()   // OTA blocking-write path
+            onOpComplete()            // serialized command-queue path
+        }
+
+        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
+            onOpComplete()            // CCCD enable completed — let queued sends run
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -227,15 +293,21 @@ class BleManager(private val context: Context) {
             val devName = g.device.name ?: g.device.address
             _connectedDevice.value = Found(devName, g.device.address)
             g.setCharacteristicNotification(txChar, true)
+            // Enable notifications via the queue FIRST, so it completes before the
+            // setup commands attachTransport fires — otherwise those writes race the
+            // descriptor write and are dropped (the status-streaming bug).
             val cccd = txChar.getDescriptor(CCCD)
             if (cccd != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    @Suppress("DEPRECATION")
-                    g.writeDescriptor(cccd)
+                enqueueOp {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
+                            android.bluetooth.BluetoothStatusCodes.SUCCESS
+                    } else {
+                        @Suppress("DEPRECATION") run {
+                            cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            g.writeDescriptor(cccd)
+                        }
+                    }
                 }
             }
             RadioRepository.attachTransport(Transport.BLE) { line -> send(line) }

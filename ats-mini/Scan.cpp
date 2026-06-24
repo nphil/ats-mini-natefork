@@ -224,6 +224,15 @@ void scanRun(uint16_t centerFreq, uint16_t step, Stream* stream, ScanProgressFn 
       lastPct = pct;
     }
   }
+  // Emit a final 100% — the loop above exits at SCAN_DONE (count == SCAN_POINTS)
+  // before a count of exactly 100% is ever computed, so the app would otherwise
+  // never see the completion tick.
+  if(stream)
+  {
+    const char *done = "{\"t\":\"scan_prog\",\"pct\":100}\r\n";
+    stream->write((const uint8_t*)done, strlen(done));
+  }
+  if(onProgress) onProgress(100);
   // Restore current frequency
   rx.setFrequency(curFreq);
   // Unmute the audio
